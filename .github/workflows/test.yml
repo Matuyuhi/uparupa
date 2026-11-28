@@ -97,7 +97,8 @@ jobs:
           printf '%s\n' 'font-family = Menlo' 'font-family = Apple Color Emoji' 'font-size = 16' 'foreground = #cdd6f4' 'background = #1e1e2e' 'window-width = 100' \
             'cursor-style = bar' 'window-height = 2' > "$dir/config/upaa/config"
           # Prints the id of the window owned by the given process, to photograph that window alone.
-          # With "wait", it first waits up to 15 seconds for the window to show, for a launch to go on as soon as it has.
+          # With "wait", it first waits up to 15 seconds for the window to show, for a launch to go on as soon as it has,
+          # and fails if none shows, so a launch with no window stops the step instead of passing a later check.
           cat > "$dir/window.swift" <<'SWIFT'
           import CoreGraphics
           import Foundation
@@ -109,6 +110,10 @@ jobs:
                   exit(0)
               }
               usleep(100_000)
+          }
+          if CommandLine.arguments.count > 2 {
+              FileHandle.standardError.write("upaa (pid \(pid)) showed no window\n".data(using: .utf8)!)
+              exit(1)
           }
           SWIFT
           # A repository with changed lines wider than the right panel, indented, for the changes shot.
