@@ -37,7 +37,8 @@ jobs:
             The changes are the commits after the latest tag (`git describe --tags --abbrev=0`) up to HEAD.
             Read their messages, and read the diff where a message does not say what changed for users.
             Write for people who use upaa: say what changed for them, in plain English, as a short Markdown list.
-            Group items under "### Added", "### Changed" and "### Fixed", leaving out a heading that has no items.
+            Group items under "### Breaking", "### Added", "### Changed" and "### Fixed", leaving out a heading that has no items.
+            "### Breaking" is for changes that make something stop working as before, such as the config format.
             Leave out commits that change nothing for users (version bumps, CI, tests, refactoring).
             Return the notes alone in `notes`, with no title and no preamble. Do not change any file.
 
