@@ -120,17 +120,7 @@ final class TerminalView: MTKView, MTKViewDelegate {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         layer?.isOpaque = renderer.backgroundOpacity >= 1
-        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
-        guard let window else { return }
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(occlusionChanged), name: NSWindow.didChangeOcclusionStateNotification, object: window)
-        redraw()
-    }
-
-    /// Nothing is drawn while no part of the window shows (hidden, minimized, covered, on another Space), so a frame
-    /// follows when it shows again.
-    @objc private func occlusionChanged() {
-        redraw()
+        if window != nil { redraw() }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -142,7 +132,7 @@ final class TerminalView: MTKView, MTKViewDelegate {
     func draw(in view: MTKView) {
         // Register to receive the next change notification before drawing.
         _ = session.takeDirty()
-        guard window?.occlusionState.contains(.visible) == true,
+        guard window != nil,
               let pass = currentRenderPassDescriptor,
               let drawable = currentDrawable,
               let commandBuffer = commandQueue.makeCommandBuffer()
