@@ -20,7 +20,7 @@ final class ChangesPanel: NSView {
         var diff: [Substring]
     }
 
-    /// After each read: the branch, nil outside a git repository, and how many files have changed.
+    /// After each read: the branch (nil outside a git repository or on a detached HEAD), and how many files have changed.
     var onUpdate: ((_ branch: String?, _ changes: Int) -> Void)?
 
     private var state: State?
