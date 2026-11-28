@@ -163,10 +163,18 @@ int32_t upaa_session_pid(UpaaSession *session);
 // The program in the terminal's foreground when it is not the shell. Returns its name's length (0 if the name cannot be
 // read), -1 while the shell has the terminal.
 ptrdiff_t upaa_session_running(UpaaSession *session, uint8_t *out, size_t cap);
+// The programs on the terminal other than the shell, in the foreground, background or stopped (as Terminal counts them
+// before closing): each name followed by '\n', empty if it cannot be read. Returns the length written; names beyond cap
+// are left out.
+size_t upaa_session_programs(UpaaSession *session, uint8_t *out, size_t cap);
 // The title the program set (UTF-8). Returns the full length (0 if none); anything beyond cap is truncated.
 size_t upaa_session_title(UpaaSession *session, uint8_t *out, size_t cap);
 // Plain text of the screen. The return value is the original length; anything beyond cap is truncated. -1 on failure.
 ptrdiff_t upaa_session_plain_text(UpaaSession *session, uint8_t *out, size_t cap);
+// The text printed since the last call (all of it on the first), as VT sequences with wrapped lines joined, for the
+// links panel. On the alternate screen, that screen alone. Returns how many bytes it wrote; if more than cap, the start is
+// left out.
+size_t upaa_session_new_text(UpaaSession *session, uint8_t *out, size_t cap);
 
 // Drawing (font, glyph atlas, cell data assembly)
 

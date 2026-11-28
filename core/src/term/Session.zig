@@ -31,6 +31,11 @@ dirty: std.atomic.Value(bool) = .init(false),
 callbacks: Callbacks,
 /// The find bar's search through the screen and the scrollback. null while the find bar is closed.
 search: vt.GhosttySearch = null,
+/// The shell's jobs, in the background or stopped, as upaa's zsh startup files report them at each prompt with
+/// OSC 7385;jobs=N. -1 until the shell reports, as bash and fish never do.
+jobs: std.atomic.Value(i32) = .init(-1),
+/// The top of the screen at the last call of newText, followed as it scrolls up into the scrollback.
+link_mark: vt.GhosttyTrackedGridRef = null,
 
 pub const Callbacks = extern struct {
     userdata: ?*anyopaque = null,
@@ -118,6 +123,9 @@ pub fn create(opts: Options) !*Session {
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_USERDATA, self);
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_WRITE_PTY, @ptrCast(&onWritePty));
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, @ptrCast(&onTitleChanged));
+    _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, @ptrCast(&onUnknownSequence));
+    var unknown_max: usize = 64;
+    _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown_max);
     // The library default (10,000 bytes) keeps only a few hundred lines of scrollback.
     var scrollback: usize = 10 * 1024 * 1024;
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback);
@@ -174,6 +182,7 @@ pub fn destroy(self: *Session) void {
     self.pty.deinit();
     for (self.stop_pipe) |fd| _ = c.close(fd);
     vt.ghostty_search_free(self.search);
+    vt.ghostty_tracked_grid_ref_free(self.link_mark);
     vt.ghostty_mouse_event_free(self.mouse_event);
     vt.ghostty_mouse_encoder_free(self.mouse_encoder);
     vt.ghostty_selection_gesture_free(self.gesture, self.terminal);
@@ -389,6 +398,23 @@ pub fn running(self: *Session, out: []u8) isize {
     return @intCast((self.pty.running(out) orelse return -1).len);
 }
 
+/// The programs that closing the session would end, each name followed by '\n' (empty when it cannot be read): the
+/// one in the foreground, or else the shell's jobs. A shell that reports its jobs (zsh with upaa's startup files) gives
+/// one empty name for each; for any other, they are the processes on the terminal, as Pty.programs. Returns the
+/// length written.
+pub fn programs(self: *Session, out: []u8) usize {
+    if (out.len == 0) return 0;
+    if (self.pty.running(out[0 .. out.len - 1])) |name| {
+        out[name.len] = '\n';
+        return name.len + 1;
+    }
+    const jobs = self.jobs.load(.monotonic);
+    if (jobs < 0) return self.pty.programs(out);
+    const n = @min(@as(usize, @intCast(jobs)), out.len);
+    @memset(out[0..n], '\n');
+    return n;
+}
+
 /// The title the program set (UTF-8), copied into out. Returns the full length; 0 if none was set.
 pub fn title(self: *Session, out: []u8) usize {
     self.lock();
@@ -484,7 +510,41 @@ pub fn plainText(self: *Session, out: []u8) ?usize {
     var screen = std.mem.zeroes(vt.GhosttySelection);
     if (vt.ghostty_terminal_grid_ref(self.terminal, activePoint(0, 0), &screen.start) != vt.GHOSTTY_SUCCESS) return null;
     if (vt.ghostty_terminal_grid_ref(self.terminal, activePoint(cols - 1, rows - 1), &screen.end) != vt.GHOSTTY_SUCCESS) return null;
-    return self.format(&screen, out);
+    return self.format(&screen, out, .plain);
+}
+
+/// The text printed since the last call, for the links panel: as VT sequences, so that hyperlinks (OSC 8) come with
+/// it, with wrapped lines joined. The first call gives the scrollback and the screen; each later one gives what
+/// scrolled up into the scrollback since the call before, and the screen again. On the alternate screen (full-screen
+/// programs) it is that screen alone. Writes as much of the end of the text as fits in out; returns how much it wrote.
+pub fn newText(self: *Session, out: []u8) usize {
+    self.lock();
+    defer self.unlock();
+
+    var cols: u16 = 0;
+    var rows: u16 = 0;
+    var screen: vt.GhosttyTerminalScreen = vt.GHOSTTY_TERMINAL_SCREEN_PRIMARY;
+    _ = vt.ghostty_terminal_get(self.terminal, vt.GHOSTTY_TERMINAL_DATA_COLS, &cols);
+    _ = vt.ghostty_terminal_get(self.terminal, vt.GHOSTTY_TERMINAL_DATA_ROWS, &rows);
+    _ = vt.ghostty_terminal_get(self.terminal, vt.GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen);
+    const primary = screen == vt.GHOSTTY_TERMINAL_SCREEN_PRIMARY;
+
+    var range = std.mem.zeroes(vt.GhosttySelection);
+    // The mark has no value once its row is dropped from the scrollback (or cleared), and then it all comes again.
+    const marked = primary and self.link_mark != null and vt.ghostty_tracked_grid_ref_snapshot(self.link_mark, &range.start) == vt.GHOSTTY_SUCCESS;
+    const top: vt.GhosttyPoint = if (primary) .{ .tag = vt.GHOSTTY_POINT_TAG_SCREEN, .value = .{ .coordinate = .{ .x = 0, .y = 0 } } } else activePoint(0, 0);
+    if (!marked and vt.ghostty_terminal_grid_ref(self.terminal, top, &range.start) != vt.GHOSTTY_SUCCESS) return 0;
+    if (vt.ghostty_terminal_grid_ref(self.terminal, activePoint(cols - 1, rows - 1), &range.end) != vt.GHOSTTY_SUCCESS) return 0;
+    const n = self.format(&range, out, .vt) orelse 0;
+
+    if (primary) {
+        if (self.link_mark == null) {
+            _ = vt.ghostty_terminal_grid_ref_track(self.terminal, activePoint(0, 0), &self.link_mark);
+        } else {
+            _ = vt.ghostty_tracked_grid_ref_set(self.link_mark, self.terminal, activePoint(0, 0));
+        }
+    }
+    return @min(n, out.len);
 }
 
 /// The selected text, written to out. Returns the full length; 0 if nothing is selected.
@@ -493,7 +553,7 @@ pub fn selectionText(self: *Session, out: []u8) ?usize {
     defer self.unlock();
     var selection: vt.GhosttySelection = undefined;
     if (vt.ghostty_terminal_get(self.terminal, vt.GHOSTTY_TERMINAL_DATA_SELECTION, &selection) != vt.GHOSTTY_SUCCESS) return 0;
-    return self.format(&selection, out);
+    return self.format(&selection, out, .plain);
 }
 
 pub fn selectAll(self: *Session) void {
@@ -567,12 +627,20 @@ fn cellIndex(px: f64, padding: u32, cell: u32, count: u32) u32 {
     return @min(@as(u32, @intFromFloat(offset / @as(f64, @floatFromInt(cell)))), count - 1);
 }
 
-/// Writes the text inside selection as plain text to out. The caller holds the lock.
-fn format(self: *Session, selection: *const vt.GhosttySelection, out: []u8) ?usize {
+/// Writes the text inside selection to out, and returns its full length. The caller holds the lock.
+/// plain: each row its own line, and what does not fit in out cut off at the end.
+/// vt: with its styles and hyperlinks, wrapped lines joined, and what does not fit cut off at the start.
+fn format(self: *Session, selection: *const vt.GhosttySelection, out: []u8, comptime as: enum { plain, vt }) ?usize {
     var formatter: vt.GhosttyFormatter = null;
     if (vt.ghostty_formatter_terminal_new(null, &formatter, self.terminal) != vt.GHOSTTY_SUCCESS) return null;
     defer vt.ghostty_formatter_free(formatter);
     _ = vt.ghostty_formatter_set(formatter, vt.GHOSTTY_FORMATTER_OPT_SELECTION, selection);
+    if (as == .vt) {
+        var emit: vt.GhosttyFormatterFormat = vt.GHOSTTY_FORMATTER_FORMAT_VT;
+        var unwrap = true;
+        _ = vt.ghostty_formatter_set(formatter, vt.GHOSTTY_FORMATTER_OPT_EMIT, &emit);
+        _ = vt.ghostty_formatter_set(formatter, vt.GHOSTTY_FORMATTER_OPT_UNWRAP, &unwrap);
+    }
 
     var buf: [*c]u8 = null;
     var n: usize = 0;
@@ -580,7 +648,8 @@ fn format(self: *Session, selection: *const vt.GhosttySelection, out: []u8) ?usi
     defer vt.ghostty_free(null, buf, n);
 
     const m = @min(n, out.len);
-    if (m > 0) @memcpy(out[0..m], buf[0..m]);
+    const from = if (as == .vt) n - m else 0;
+    if (m > 0) @memcpy(out[0..m], buf[from..][0..m]);
     return n;
 }
 
@@ -640,6 +709,17 @@ fn onWritePty(_: vt.GhosttyTerminal, userdata: ?*anyopaque, data: [*c]const u8, 
 fn onTitleChanged(_: vt.GhosttyTerminal, userdata: ?*anyopaque) callconv(.c) void {
     const self: *Session = @ptrCast(@alignCast(userdata orelse return));
     if (self.callbacks.on_title) |f| f(self.callbacks.userdata);
+}
+
+/// Takes the count of jobs from upaa's zsh startup files (OSC 7385;jobs=N) and ignores any other sequence.
+fn onUnknownSequence(_: vt.GhosttyTerminal, userdata: ?*anyopaque, sequence: [*c]const vt.GhosttyTerminalUnknownSequence) callconv(.c) void {
+    const self: *Session = @ptrCast(@alignCast(userdata orelse return));
+    if (sequence.*.tag != vt.GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_OSC) return;
+    const content = sequence.*.value.osc.content;
+    const prefix = "7385;jobs=";
+    if (content.len <= prefix.len or !std.mem.startsWith(u8, content.ptr[0..content.len], prefix)) return;
+    const jobs = std.fmt.parseInt(i32, content.ptr[prefix.len..content.len], 10) catch return;
+    self.jobs.store(jobs, .monotonic);
 }
 
 fn waitForText(self: *Session, needle: []const u8, out: []u8) !void {
@@ -760,6 +840,50 @@ test "a program the shell runs in the foreground is told from the shell" {
         _ = c.usleep(100 * 1000);
     }
     try std.testing.expectEqualStrings("sleep", name[0..@intCast(@max(n, 0))]);
+}
+
+test "a job the shell runs in the background is counted among its programs" {
+    const self = try Session.create(.{ .size = .{ .cols = 80, .rows = 24 }, .command = "/bin/sh" });
+    defer self.destroy();
+    self.write("sleep 5 &\n");
+    try self.waitForPrograms("sleep\n");
+}
+
+test "zsh with upaa's startup files reports its jobs, but not the ones it disowned" {
+    const self = try Session.create(.{
+        .size = .{ .cols = 80, .rows = 24 },
+        .command = "UPAA_ZDOTDIR=\"$PWD/tests/zsh\" ZDOTDIR=\"$PWD/Resources/shell-integration/zsh\" exec zsh -i",
+    });
+    defer self.destroy();
+    var out: [8192]u8 = undefined;
+    try self.waitForPrompt(80, &out);
+    try self.waitForPrograms("");
+    // Themes start their daemons this way, as powerlevel10k does gitstatusd. It stays on the terminal, but is no job.
+    self.write("sleep 3 &!; echo disowned-$((1+1))\n");
+    try self.waitForText("disowned-2", &out);
+    self.write("sleep 30 &\n");
+    try self.waitForPrograms("\n");
+    self.write("kill %1; wait\n");
+    try self.waitForPrograms("");
+}
+
+/// Waits until programs gives the names expected.
+fn waitForPrograms(self: *Session, expected: []const u8) !void {
+    var names: [256]u8 = undefined;
+    var n: usize = 0;
+    var tries: usize = 0;
+    while (tries < 500) : (tries += 1) {
+        n = self.programs(&names);
+        if (std.mem.eql(u8, names[0..n], expected)) return;
+        _ = c.usleep(10 * 1000);
+    }
+    try std.testing.expectEqualStrings(expected, names[0..n]);
+}
+
+test "a count of jobs reported by the shell stands for them" {
+    const self = try Session.create(.{ .size = .{ .cols = 80, .rows = 24 }, .command = "printf '\\033]7385;jobs=2\\007'; read _" });
+    defer self.destroy();
+    try self.waitForPrograms("\n\n");
 }
 
 fn typeText(self: *Session, text: []const u8) void {
@@ -899,6 +1023,25 @@ test "the find bar's search finds the matches in view and moves between them" {
     update = self.updateRenderState(state, &matches) orelse return error.UpdateFailed;
     try std.testing.expectEqual(@as(usize, 0), update.matches);
     try std.testing.expectEqual(@as(usize, 0), self.findCount(&selected));
+}
+
+test "newText joins a wrapped address, keeps a hyperlink's target, and next time leaves out what scrolled up before" {
+    // 20 columns, so the address wraps, and 3 rows, so the first lines go up into the scrollback.
+    const self = try Session.create(.{ .size = .{ .cols = 20, .rows = 3 }, .command = "printf 'see https://example.com/a/long/path\\n\\033]8;;https://example.com/b\\033\\\\label\\033]8;;\\033\\\\\\n'; echo upaa-first; read _; echo upaa-second; read _" });
+    defer self.destroy();
+    var out: [4096]u8 = undefined;
+    try self.waitForText("upaa-first", &out);
+
+    var text: [8192]u8 = undefined;
+    var n = self.newText(&text);
+    try std.testing.expect(std.mem.indexOf(u8, text[0..n], "https://example.com/a/long/path") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text[0..n], "\x1b]8;;https://example.com/b") != null);
+
+    self.write("\n");
+    try self.waitForText("upaa-second", &out);
+    n = self.newText(&text);
+    try std.testing.expect(std.mem.indexOf(u8, text[0..n], "upaa-second") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text[0..n], "long/path") == null);
 }
 
 test "mouse events go to programs that ask for them" {
