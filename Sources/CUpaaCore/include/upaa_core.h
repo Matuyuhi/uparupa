@@ -167,6 +167,10 @@ size_t upaa_session_programs(UpaaSession *session, uint8_t *out, size_t cap);
 size_t upaa_session_title(UpaaSession *session, uint8_t *out, size_t cap);
 // Plain text of the screen. The return value is the original length; anything beyond cap is truncated. -1 on failure.
 ptrdiff_t upaa_session_plain_text(UpaaSession *session, uint8_t *out, size_t cap);
+// The text printed since the last call (all of it on the first), as VT sequences with wrapped lines joined, for the
+// links panel. On the alternate screen, that screen alone. Returns how many bytes it wrote; if more than cap, the start is
+// left out.
+size_t upaa_session_new_text(UpaaSession *session, uint8_t *out, size_t cap);
 
 // Drawing (font, glyph atlas, cell data assembly)
 

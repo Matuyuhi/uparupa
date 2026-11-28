@@ -38,6 +38,28 @@ enum Chrome {
         NSColor(srgbRed: 248 / 255, green: 81 / 255, blue: 73 / 255, alpha: $0.isDark ? 0.2 : 0.13)
     }
 
+    /// A scroll view of the right panel's rows, which scrolls up and down only. A flipped document view keeps the rows
+    /// at the top.
+    static func scroller(_ rows: NSStackView) -> NSScrollView {
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 0
+        rows.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 8, right: 8)
+        let document = FlippedView()
+        document.addSubview(rows)
+        rows.pin(to: document)
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor).isActive = true
+        document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor).isActive = true
+        return scroll
+    }
+
     static func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, mono: Bool = false,
                       color: NSColor = .labelColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)
@@ -47,6 +69,10 @@ enum Chrome {
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
     }
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 extension NSAppearance {
@@ -165,7 +191,11 @@ final class Clickable: NSView {
 
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
-    override func mouseDown(with event: NSEvent) { pressed = true }
+    /// A Control-click on a row with a menu goes on to NSView, which shows the menu, as a right click does.
+    override func mouseDown(with event: NSEvent) {
+        guard menu == nil || !event.modifierFlags.contains(.control) else { return super.mouseDown(with: event) }
+        pressed = true
+    }
 
     override func mouseDragged(with event: NSEvent) {
         pressed = bounds.contains(convert(event.locationInWindow, from: nil))

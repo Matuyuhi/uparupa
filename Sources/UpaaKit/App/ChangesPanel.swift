@@ -34,24 +34,7 @@ final class ChangesPanel: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        rows.orientation = .vertical
-        rows.alignment = .leading
-        rows.spacing = 0
-        rows.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 8, right: 8)
-
-        // A flipped document view keeps the rows at the top of the scroll view.
-        let document = FlippedView()
-        document.addSubview(rows)
-        rows.pin(to: document)
-        let scroll = NSScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.documentView = document
-        document.translatesAutoresizingMaskIntoConstraints = false
-        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
-        document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor).isActive = true
-        document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor).isActive = true
+        let scroll = Chrome.scroller(rows)
 
         openButton.target = self
         openButton.action = #selector(openInEditor)
@@ -227,10 +210,6 @@ final class ChangesPanel: NSView {
         process.waitUntilExit()
         return process.terminationStatus <= 1 ? String(decoding: data, as: UTF8.self) : nil
     }
-}
-
-private final class FlippedView: NSView {
-    override var isFlipped: Bool { true }
 }
 
 /// A label that wraps at the width the layout gives it. A wrapping NSTextField sizes its height for
