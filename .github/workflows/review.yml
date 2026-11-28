@@ -1,34 +1,85 @@
 name: review
 
-# Claude reviews a pull request once, when it is opened as ready or a draft is marked ready for review.
-# Later pushes are not reviewed again. Pull requests from forks are skipped by the action itself.
+# Claude reviews a pull request when it is opened as ready, a draft is marked ready for review, or a push lands on it.
+# The review ends with a verdict line, which the last step turns into the label ready-to-merge or needs-human.
+# A draft only loses the label. Pull requests from forks are skipped: their token cannot label, and they get no label.
 on:
   pull_request:
-    types: [opened, ready_for_review]
+    types: [opened, ready_for_review, synchronize, converted_to_draft]
 
 permissions:
   contents: read
 
+# A newer push replaces the review of the older one.
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
+      issues: write
       pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      # The verdict of an older commit does not hold for this one.
+      - name: Take off the last verdict
+        run: |
+          gh label create ready-to-merge --color 0e8a16 --description "Claude review found nothing that needs a person" --force
+          gh label create needs-human --color d93f0b --description "Claude review says a person has to look before merging" --force
+          for label in ready-to-merge needs-human; do
+            gh api -X DELETE "repos/$GH_REPO/issues/$PR/labels/$label" --silent 2>/dev/null || true
+          done
 
-      - uses: anthropics/claude-code-action@v1.0.290
+      # The whole history, for git log and git diff against the commit of an earlier review.
+      - if: ${{ !github.event.pull_request.draft }}
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - id: claude
+        if: ${{ !github.event.pull_request.draft }}
+        uses: anthropics/claude-code-action@v1.0.290
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           claude_args: >-
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr review --comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --model opus
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr review --comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
+            HEAD COMMIT: ${{ github.event.pull_request.head.sha }}
 
             Review this pull request as .github/review.md says.
             Post the summary with `gh pr review --comment --body "<summary>" ${{ github.event.pull_request.number }}`.
+
+      # Reads the verdict line of this run's review on this commit. The label is needs-human when the review did not
+      # finish, a request fails, the line is anything else, or the pull request touches the paths below.
+      - name: Label the verdict
+        if: ${{ !cancelled() && !github.event.pull_request.draft }}
+        env:
+          REVIEWED: ${{ steps.claude.outcome }}
+        run: |
+          label=needs-human
+          if [ "$REVIEWED" = success ] &&
+            files="$(gh api "repos/$GH_REPO/pulls/$PR/files" --paginate --jq '.[].filename')" &&
+            body="$(gh api "repos/$GH_REPO/pulls/$PR/reviews?per_page=100" \
+              --jq "[.[] | select(.user.login == \"github-actions[bot]\" and .commit_id == \"$SHA\")] | last | .body // \"\"")"; then
+            verdict="$(printf '%s\n' "$body" | sed -e 's/\*//g' -e 's/[[:space:]]*$//' | grep '^判定:' | tail -n 1)"
+            echo "verdict: ${verdict:-none}"
+            # Changes to how pull requests are checked, built, installed or released, and reference images, are for a person to look at.
+            paths="$(printf '%s\n' "$files" \
+              | grep -E '^(\.github/|CLAUDE\.md$|build\.zig\.zon$|install\.sh$|scripts/(upaa-launcher|fetch-ghostty-vt)\.sh$|tests/snapshots/|LICENSE$|THIRD_PARTY_LICENSES\.md$)' || true)"
+            [ -z "$paths" ] || printf 'paths for a person:\n%s\n' "$paths"
+            if [ "$verdict" = "判定: マージ可" ] && [ -z "$paths" ]; then label=ready-to-merge; fi
+          fi
+          gh api -X POST "repos/$GH_REPO/issues/$PR/labels" -f "labels[]=$label" --silent
