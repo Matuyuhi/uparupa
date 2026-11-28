@@ -111,8 +111,9 @@ final class ChangesPanel: NSView {
             add(Chrome.label(String(localized: "Not a git repository"), size: 11, color: .secondaryLabelColor), inset: 6)
             return
         }
-        add(Chrome.label(String(localized: "Changes · ^[\(state.files.count) file](inflect: true)"), size: 11, weight: .semibold,
-                         color: .secondaryLabelColor), inset: 6)
+        let count = state.files.count
+        add(Chrome.label(count == 1 ? String(localized: "Changes · 1 file") : String(localized: "Changes · \(count) files"),
+                         size: 11, weight: .semibold, color: .secondaryLabelColor), inset: 6)
         if state.files.isEmpty { add(Chrome.label(String(localized: "No changes"), size: 12, color: .secondaryLabelColor), inset: 6, top: 6) }
         for file in state.files {
             let selected = file.path == state.selected
