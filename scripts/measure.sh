@@ -16,6 +16,7 @@ results="$out/results.tsv"
 now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
 calc() { awk "BEGIN { printf \"%.$1f\", $2 }"; }
 record() {
+  case "$2" in '' | *[!0-9.]* | *.*.*) echo "no number for $1: $2" >&2; exit 1 ;; esac
   printf '%s\t%s\n' "$1" "$2" >> "$results"
   echo "$1: $2"
 }
@@ -60,6 +61,8 @@ SWIFT
 swiftc -O "$out/window.swift" -o "$out/window"
 
 pid=
+# A failure on the way leaves no app running.
+trap '[ -z "$pid" ] || kill "$pid" 2> /dev/null || true' EXIT
 launch() {
   # Each launch starts at the default size, with no config file, and without the daily update check.
   defaults delete local.upaa 2>/dev/null || true
@@ -128,10 +131,11 @@ launch_time() {
     echo "$(calc 3 "$(now) - $start")" >> "$out/launch.txt"
     quit
   done
-  sort -n "$out/launch.txt" | sed -n 2p
 }
-record launch_to_window_s "$(launch_time launch)"
-record calculator_launch_to_window_s "$(launch_time calculator)"
+launch_time launch
+record launch_to_window_s "$(sort -n "$out/launch.txt" | sed -n 2p)"
+launch_time calculator
+record calculator_launch_to_window_s "$(sort -n "$out/launch.txt" | sed -n 2p)"
 : > "$out/version.txt"
 for i in 1 2 3; do
   start=$(now)
@@ -172,6 +176,7 @@ sleep 8
 record five_panes_idle_cpu_percent "$(cpu_over 20)"
 record five_panes_footprint_mib "$(footprint)"
 quit
+pid=
 defaults delete local.upaa 2>/dev/null || true
 
 awk -F '\t' 'BEGIN { printf "{" } { printf "%s\"%s\": %s", (NR > 1 ? ", " : ""), $1, $2 } END { print "}" }' "$results" > "$out/results.json"

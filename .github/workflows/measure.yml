@@ -1,7 +1,7 @@
 name: measure
 
 # Every Monday at 9:00 in Japan, measures how big and how fast upaa is (scripts/measure.sh) and keeps the numbers in
-# one Issue with the label measurements, edited each week, with what got worse since the last run. A run that finds
+# one Issue with the label measurements, edited each week, with what got worse than the last runs. A run that finds
 # something worse also comments on the Issue, so it notifies. Then Claude reads the numbers and the code and files
 # what could be lighter or faster as Issues; it pushes nothing.
 # A pull request that changes the measuring only measures, to show the numbers in its run.
@@ -17,9 +17,10 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request replaces its run. Weekly and manual runs are never cancelled.
 concurrency:
-  group: measure-${{ github.event.pull_request.number || 'main' }}
-  cancel-in-progress: true
+  group: measure-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   measure:
@@ -82,25 +83,29 @@ jobs:
           gh run download "$GITHUB_RUN_ID" --name measurements --dir .
           gh label create measurements --color 5319e7 --description "Weekly numbers of how big and how fast upaa is" --force
           issue="$(gh issue list --label measurements --state open --limit 1 --json number --jq '.[0].number // empty')"
-          prev='{}'
+          hist='[]'
           if [ -n "$issue" ]; then
-            prev="$(gh issue view "$issue" --json body --jq .body | sed -n 's/^<!-- measurements: \(.*\) -->$/\1/p')"
-            [ -n "$prev" ] || prev='{}'
+            hist="$(gh issue view "$issue" --json body --jq .body | sed -n 's/^<!-- measurements: \(.*\) -->$/\1/p')"
+            [ -n "$hist" ] || hist='[]'
           fi
-          # Worse means more than 25% worse and by more than the noise floor of its unit. Shared runners are noisy,
-          # so one bad week is a hint to look, not proof.
-          jq -rn --argjson cur "$(cat results.json)" --argjson prev "$prev" '
-            def floor: if endswith("_percent") then 1 elif endswith("_ms") then 0.05 elif endswith("_kib") then 16
+          # Compared with the last four runs, since shared runners are noisy (a cold build took 99 to 212 s on the
+          # same day). Worse means beyond the worst of them by 10%, more than 25% from their middle value, and by
+          # more than the noise floor of its unit. A slow drift of a few percent a week is not flagged; the middle
+          # value in the table shows it.
+          jq -rn --argjson cur "$(cat results.json)" --argjson hist "$hist" '
+            def noise: if endswith("_percent") then 1 elif endswith("_ms") then 0.05 elif endswith("_kib") then 16
               elif endswith("_mib") then 2 else 0.1 end;
-            def worse($k; $a; $b): if $k | endswith("_per_s") then $a < $b * 0.75 and $b - $a > 1
-              else $a > $b * 1.25 and $a - $b > ($k | floor) end;
-            [$cur | to_entries[] | .key as $k | .value as $a | $prev[$k] as $b
-              | { k: $k, a: $a, b: $b, worse: ($b != null and worse($k; $a; $b)),
-                  change: (if $b == null or $b == 0 then "" else "\((($a - $b) / $b * 100) | round)%" end) }]
+            [$cur | to_entries[] | .key as $k | .value as $a | [$hist[] | .[$k] | numbers] as $v
+              | ($v | sort | .[length / 2 | floor]) as $mid
+              | { k: $k, a: $a, mid: $mid, range: (if $v == [] then "" else "\($v | min) to \($v | max)" end),
+                  worse: ($v != [] and (if $k | endswith("_per_s")
+                    then $a < ($v | min) * 0.9 and $a < $mid * 0.75 and $mid - $a > 1
+                    else $a > ($v | max) * 1.1 and $a > $mid * 1.25 and $a - $mid > ($k | noise) end)),
+                  change: (if $mid == null or $mid == 0 then "" else "\((($a - $mid) / $mid * 100) | round)%" end) }]
             | (map(select(.worse) | .k) | join(", ")) as $worse
-            | "\(if $worse == "" then "Nothing got worse since the last run." else "Worse than the last run: \($worse)" end)\n",
-              "| Measure | This run | Last run | Change |", "|---|---|---|---|",
-              (.[] | "| \(.k) | \(.a)\(if .worse then " ⚠️" else "" end) | \(.b // "") | \(.change) |"),
+            | "\(if $worse == "" then "Nothing got worse." else "Worse than the last runs: \($worse)" end)\n",
+              "| Measure | This run | Middle of last \($hist | length) | Their range | Change |", "|---|---|---|---|---|",
+              (.[] | "| \(.k) | \(.a)\(if .worse then " ⚠️" else "" end) | \(.mid // "") | \(.range) | \(.change) |"),
               "", "WORSE=\($worse)"' > report.txt
           worse="$(sed -n 's/^WORSE=//p' report.txt)"
           {
@@ -111,7 +116,7 @@ jobs:
             echo
             echo "Names ending in _per_s are better higher; all others are better lower."
             echo
-            echo "<!-- measurements: $(jq -c . results.json) -->"
+            echo "<!-- measurements: $(jq -nc --argjson cur "$(cat results.json)" --argjson hist "$hist" '$hist + [$cur] | .[-4:]') -->"
           } > body.md
           if [ -n "$issue" ]; then
             gh issue edit "$issue" --body-file body.md
@@ -119,7 +124,7 @@ jobs:
             issue="$(gh issue create --title "週ごとの計測（サイズと速さ）" --label measurements --body-file body.md | sed 's#.*/##')"
           fi
           if [ -n "$worse" ]; then
-            gh issue comment "$issue" --body "Worse than the last run: $worse. See the table above."
+            gh issue comment "$issue" --body "Worse than the last runs: $worse. See the table above."
           fi
 
   # Claude reads the numbers and the code, and files ways to make upaa lighter or faster. It can only read the
