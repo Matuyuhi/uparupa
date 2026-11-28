@@ -303,7 +303,8 @@ jobs:
     steps:
       - name: Post the launch screenshots
         run: |
-          # A run of an older push that ends after a newer one leaves the pictures and the comment alone.
+          # A run of an older push that ends after a newer one leaves the pictures and the comment alone. Checked again
+          # just before the push and the comment, as a newer run may have finished meanwhile.
           current() { [ "$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha)" = "$SHA" ] || { echo "#$PR is no longer at $SHA"; exit 0; }; }
           current
           gh run download "$GITHUB_RUN_ID" --name launch-screenshots --dir shots
@@ -397,6 +398,7 @@ jobs:
             cp -R "../$out" "pr-$PR/"
             git add -A
             git commit -q -m "Launch screenshots of #$PR at $SHA"
+            current
             git push -q --force-with-lease="ci-screenshots:$last" origin HEAD:ci-screenshots && break
             [ "$attempt" != 3 ] || exit 1
           done
