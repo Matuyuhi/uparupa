@@ -1,0 +1,59 @@
+# Throwaway: measures idle CPU on main and on this branch for #101. Removed before the pull request is ready.
+name: idle-cpu
+on:
+  push:
+    branches: [claude/project-thread-cupemw]
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      UPAA_NO_UPDATE_CHECK: "1"
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Fetched dependencies cache
+        id: vendor
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            vendor/ghostty-vt
+            vendor/zig
+          key: vendor-${{ hashFiles('scripts/fetch-ghostty-vt.sh', 'scripts/fetch-zig.sh') }}
+      - run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+      - if: steps.vendor.outputs.cache-hit != 'true'
+        run: |
+          brew install minisign
+          sh scripts/fetch-ghostty-vt.sh
+          sh scripts/fetch-zig.sh
+      - run: echo "$PWD/vendor/zig" >> "$GITHUB_PATH"
+      - name: Build both
+        run: |
+          CONFIG=release sh scripts/build-app.sh > /dev/null
+          git worktree add ../main origin/main
+          cp -R vendor ../main/
+          (cd ../main && CONFIG=release sh scripts/build-app.sh > /dev/null)
+      - name: Measure
+        run: |
+          mkdir -p cfg/on/upaa cfg/off/upaa
+          echo 'mascot = false' > cfg/off/upaa/config
+          cpu() { ps -o time= -p "$pid" | awk -F: '{ s = 0; for (i = 1; i <= NF; i++) s = s * 60 + $i; print s }'; }
+          pct() { awk "BEGIN { printf \"%.2f\", ($2 - $1) / $3 * 100 }"; }
+          run() {
+            XDG_CONFIG_HOME="$PWD/cfg/$3" "$2" -AppleLanguages '(en)' > /dev/null 2>&1 &
+            pid=$!
+            sleep 5; a=$(cpu); sleep 25; b=$(cpu); sleep 15; c=$(cpu); sleep 60; d=$(cpu)
+            echo "$1: 5-30 s $(pct "$a" "$b" 25)%  45-105 s $(pct "$c" "$d" 60)%"
+            kill "$pid"; wait "$pid" || true
+            defaults delete local.upaa 2> /dev/null || true
+            sleep 3
+          }
+          for i in 1 2; do
+            run main ../main/build/upaa.app/Contents/MacOS/upaa on
+            run branch build/upaa.app/Contents/MacOS/upaa on
+            run branch-mascot-off build/upaa.app/Contents/MacOS/upaa off
+          done
