@@ -37,8 +37,6 @@ jobs:
     env:
       # The image default is Xcode 27.1. Use 27.2, the same as local.
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
-      # The Zig used here. release.yml takes Homebrew's.
-      ZIG_VERSION: 0.17.1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -59,33 +57,15 @@ jobs:
             ~/.cache/zig
             .zig-cache
             .build
-          key: build-${{ runner.os }}-zig-${{ env.ZIG_VERSION }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**') }}
-          restore-keys: build-${{ runner.os }}-zig-${{ env.ZIG_VERSION }}-
-
-      # Zig's own build, kept in the cache by its version. Homebrew's needs LLVM too, which took 35 to 55 seconds each run.
-      - name: Zig cache
-        id: zig
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/zig
-          key: zig-${{ env.ZIG_VERSION }}-aarch64-macos
+          # fetch-zig.sh pins the Zig version, so a new Zig saves a cache of its own.
+          key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**', 'scripts/fetch-zig.sh') }}
+          restore-keys: build-${{ runner.os }}-
 
       - name: Install Zig
         run: |
-          if [ "${{ steps.zig.outputs.cache-hit }}" != true ]; then
-            brew install minisign
-            file="zig-aarch64-macos-$ZIG_VERSION.tar.xz"
-            for f in "$file" "$file.minisig"; do
-              curl -fsSL --proto =https -o "$RUNNER_TEMP/$f" "https://ziglang.org/download/$ZIG_VERSION/$f"
-            done
-            # The key on ziglang.org/download.
-            minisign -V -q -P RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U -m "$RUNNER_TEMP/$file"
-            mkdir -p ~/zig
-            tar -xJf "$RUNNER_TEMP/$file" -C ~/zig --strip-components 1
-          fi
-          echo "$HOME/zig" >> "$GITHUB_PATH"
+          brew install zig
           # libghostty-vt 1.0.x and build.zig assume Zig 0.17.x.
-          ~/zig/zig version | grep -q '^0\.17\.' || { echo "Zig 0.17.x is required: $(~/zig/zig version)"; exit 1; }
+          zig version | grep -q '^0\.17\.' || { echo "Zig 0.17.x is required: $(zig version)"; exit 1; }
 
       - name: Install Metal Toolchain
         run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
