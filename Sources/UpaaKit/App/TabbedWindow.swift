@@ -18,6 +18,8 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         var top: NSView
         /// The pane that has (or last had) the keyboard.
         var focus: TerminalView
+        /// A pane wrote to its screen while another tab was shown, and the tab has not been shown since.
+        var unseen = false
 
         init(_ terminal: TerminalView) {
             top = terminal
@@ -153,8 +155,11 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         watch(first)
         tabs.append(Tab(first))
         select(0)
-        // The tab list follows the shells' directories, and the panel the files, without a signal from either.
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.readChanges() }
+        // The tabs follow the shells' directories and programs, and the panel the files, without a signal from any.
+        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            self?.refresh()
+            self?.readChanges()
+        }
     }
 
     /// The tabs along the top get the window's width less what the traffic lights and the buttons beside them take.
@@ -246,11 +251,10 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     /// The middle of the window: the selected tab, and the footer under it with the shell, the focused pane's size and
     /// the main keys, its text in line with the terminal's.
     private func terminalArea() -> NSViewController {
-        let shell = (ProcessInfo.processInfo.environment["SHELL"].map { ($0 as NSString).lastPathComponent }) ?? "sh"
         let space = NSView()
         space.setContentHuggingPriority(.init(1), for: .horizontal)
         let footer = NSStackView(views: [
-            Chrome.label(shell, size: 11, color: .secondaryLabelColor), sizeLabel,
+            Chrome.label(Self.shell, size: 11, color: .secondaryLabelColor), sizeLabel,
             Chrome.label("UTF-8", size: 11, color: .secondaryLabelColor), space, problemButton,
             Chrome.label(String(localized: "⌘D Split · ⌘F Find · ⌘B Tabs"), size: 11, color: .secondaryLabelColor),
         ])
@@ -458,9 +462,15 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     // MARK: Tabs and panes
 
-    /// Follows the pane's title, focus and shell. Its shell exiting closes the pane.
+    /// Follows the pane's title, output, focus and shell. Its shell exiting closes the pane.
     private func watch(_ terminal: TerminalView) {
         terminal.session.onTitle = { [weak self] in self?.refresh() }
+        terminal.onOutput = { [weak self, weak terminal] in
+            guard let self, let terminal, let tab = self.tab(of: terminal), tab !== self.tabs[self.selected],
+                  !tab.unseen else { return }
+            tab.unseen = true
+            self.refresh()
+        }
         terminal.onResize = { [weak self] in self?.showSize() }
         terminal.onFocus = { [weak self, weak terminal] in
             guard let self, let terminal, let tab = self.tab(of: terminal) else { return }
@@ -570,6 +580,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         let tab = tabs[index]
         if tab.top.superview == nil { show(tab) }
         selected = index
+        tab.unseen = false
         window.makeFirstResponder(tab.focus)
         refresh()
         readChanges()
@@ -596,11 +607,13 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     /// Brings the tab list, the panes and the window's title up to date.
     private func refresh() {
         let tab = tabs[selected]
-        window.title = tab.focus.session.title ?? "upaa"
+        let titles = tabs.map(name(of:))
+        window.title = titles[selected]
         window.subtitle = [place(of: tab), branch ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-        let titles = tabs.map { $0.focus.session.title ?? "upaa" }
-        tabList.show(zip(titles, tabs).map { (title: $0, place: place(of: $1)) }, selected: selected)
-        tabStrip.show(zip(tabs, titles).map { (id: ObjectIdentifier($0), title: $1) }, selected: selected)
+        tabList.show(zip(titles, tabs).map { (title: $0, detail: detail(of: $1), unseen: $1.unseen) },
+                     selected: selected)
+        tabStrip.show(zip(tabs, titles).map { (id: ObjectIdentifier($0), title: $1, unseen: $0.unseen) },
+                      selected: selected)
 
         // A split or a closed pane can change which panes are along the top.
         host.needsLayout = true
@@ -613,6 +626,21 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         guard selected < tabs.count else { return }
         let size = tabs[selected].focus.gridSize
         sizeLabel.stringValue = "\(size.cols)×\(size.rows)"
+    }
+
+    /// The shell the panes start, as the footer and the tab list name it.
+    private static let shell =
+        ProcessInfo.processInfo.environment["SHELL"].map { ($0 as NSString).lastPathComponent } ?? "sh"
+
+    /// The title the focused pane's program set, or else the name of the program, as in the tab list's second line.
+    private func name(of tab: Tab) -> String {
+        tab.focus.session.title ?? tab.focus.session.running.flatMap { $0.isEmpty ? nil : $0 } ?? "upaa"
+    }
+
+    /// The tab list's second line: the focused pane's directory and the program running in it, or its shell while
+    /// the shell waits for input.
+    private func detail(of tab: Tab) -> String {
+        [place(of: tab), tab.focus.session.running ?? Self.shell].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// The focused pane's directory, with ~ for home.

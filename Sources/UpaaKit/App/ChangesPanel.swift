@@ -148,11 +148,23 @@ final class ChangesPanel: NSView {
         if let previous = rows.arrangedSubviews.dropLast().last { rows.setCustomSpacing(top, after: previous) }
     }
 
-    /// One line of the diff. A line wider than the panel wraps, as the panel is too narrow to scroll sideways through.
+    /// One line of the diff, 17 high as in the design. A line wider than the panel wraps, as the panel is too narrow to
+    /// scroll sideways through, and goes on under its text: past the +, - or space in front and its own indentation, up
+    /// to a third of the narrowest panel, so a deep one still leaves room for the text.
     private static func diffLine(_ line: Substring) -> NSView {
-        let label = WrappingLabel(wrappingLabelWithString: String(line))
-        label.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        label.textColor = line.hasPrefix("@@") ? .secondaryLabelColor : .labelColor
+        let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        let lead = line.hasPrefix("@@") ? "" : line.prefix(1) + line.dropFirst().prefix { $0 == " " || $0 == "\t" }
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = 17
+        style.maximumLineHeight = 17
+        style.headIndent = min(NSAttributedString(string: String(lead), attributes: [.font: font]).size().width,
+                               Chrome.sidePanelWidth / 3)
+        let label = WrappingLabel(wrappingLabelWithString: "")
+        // The extra height of a line goes above its text, so the text moves up by half of it to sit in the middle.
+        label.attributedStringValue = NSAttributedString(string: String(line), attributes: [
+            .font: font, .paragraphStyle: style, .baselineOffset: (17 - font.ascender + font.descender) / 2,
+            .foregroundColor: line.hasPrefix("@@") ? NSColor.secondaryLabelColor : .labelColor,
+        ])
         label.isSelectable = false
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let fill = Fill(line.hasPrefix("+") ? Chrome.addedLine : line.hasPrefix("-") ? Chrome.removedLine : .clear)
@@ -161,8 +173,8 @@ final class ChangesPanel: NSView {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: fill.leadingAnchor, constant: 10),
             label.trailingAnchor.constraint(equalTo: fill.trailingAnchor, constant: -10),
-            label.topAnchor.constraint(equalTo: fill.topAnchor, constant: 1),
-            label.bottomAnchor.constraint(equalTo: fill.bottomAnchor, constant: -1),
+            label.topAnchor.constraint(equalTo: fill.topAnchor),
+            label.bottomAnchor.constraint(equalTo: fill.bottomAnchor),
         ])
         return fill
     }

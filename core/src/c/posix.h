@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
