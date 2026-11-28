@@ -17,6 +17,8 @@ final class Config {
     let rows: Int
     /// The lines that could not be read, in the user's language.
     let problems: [String]
+    /// Whether the app opens the socket that the upaa command reaches it through from a pane (RemoteControl).
+    let remoteControl: Bool
 
     /// With no text, every setting is the default. Snapshots use this, so the baseline images do not depend on the user's file.
     init(text: String = "") {
@@ -29,6 +31,7 @@ final class Config {
         backgroundOpacity = values.background_opacity
         cols = Int(values.window_width)
         rows = Int(values.window_height)
+        remoteControl = values.remote_control
         problems = UnsafeBufferPointer(start: values.problems, count: values.problem_count).map { problem in
             let line = Int(problem.line)
             let start = Int(problem.key_start), end = start + Int(problem.key_len)

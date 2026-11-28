@@ -56,6 +56,22 @@ upaa update     # reinstall the latest release
 upaa --version
 ```
 
+### From a pane
+
+With `remote-control = true` in the config, a shell, a script or Claude Code in a pane can act on the other tabs and panes:
+
+```sh
+upaa list                          # one line per pane: ID, window, tab, focus, directory, program, title, size
+upaa focus --pane 4321             # a pane's ID is its shell's process ID
+upaa new-tab                       # prints the new pane's ID
+upaa split --down
+upaa read --pane 4321              # the screen's text, without the scrollback
+upaa send --pane 4321 $'ls\n'      # typed as is; write the Enter yourself
+upaa close --pane 4321
+```
+
+Without `--pane`, a command acts on the pane it runs in. `read`, `send` and `close` follow the tab's setting in its menu (right-click the tab): Allow, Ask Each Time (the default, a sheet in the window) or Deny. The setting is not kept after the tab closes or upaa quits. Remote control is off by default; it only guards against typing into the wrong pane by mistake, not against another program of yours, which could turn it on in the config.
+
 On launch, upaa asks GitHub at most once a day whether a newer release exists. It only tells you; it never updates on its own. Set `UPAA_NO_UPDATE_CHECK=1` to turn the check off.
 
 ## Configuration

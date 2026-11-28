@@ -6,11 +6,13 @@ import AppKit
 /// the middle button closes it too, and a row can be dragged to another place, as the tabs along the top can. AppKit's
 /// sidebar glass shows what is behind the window, not upaa's gradient, so the sidebar lays the window's ground (the
 /// gradient and the card, lined up with the window's) under a pane of the design's glass color.
-final class TabList: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+final class TabList: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
     /// A row was picked by the user.
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onMove: ((_ from: Int, _ to: Int) -> Void)?
+    /// Fills a row's menu (a right click).
+    var onMenu: ((Int, NSMenu) -> Void)?
     private var items: [Item] = []
     /// What the owner showed while a row was being dragged, shown once the drag ends.
     private var pending: (items: [Item], selected: Int)?
@@ -56,6 +58,8 @@ final class TabList: NSViewController, NSTableViewDataSource, NSTableViewDelegat
             if from != to { self.onMove?(from, to) }
             if let pending = self.pending { self.show(pending.items, selected: pending.selected) }
         }
+        table.menu = NSMenu()
+        table.menu?.delegate = self
     }
 
     @available(*, unavailable)
@@ -164,6 +168,12 @@ final class TabList: NSViewController, NSTableViewDataSource, NSTableViewDelegat
             stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
+    }
+
+    /// The menu is made each time for the row clicked.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        if table.clickedRow >= 0 { onMenu?(table.clickedRow, menu) }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

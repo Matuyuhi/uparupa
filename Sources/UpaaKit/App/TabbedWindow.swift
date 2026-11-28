@@ -20,6 +20,8 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         var focus: TerminalView
         /// A pane wrote to its screen while another tab was shown, and the tab has not been shown since.
         var unseen = false
+        /// Whether the upaa command may read, type into and close its panes; set in the tab's menu.
+        var access = RemoteAccess.ask
 
         init(_ terminal: TerminalView) {
             top = terminal
@@ -121,8 +123,10 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
             }
         }
         tabStrip.onMove = { [weak self] in self?.moveTab(from: $0, to: $1) }
+        tabStrip.onMenu = { [weak self] index, menu in self?.fillMenu(menu, tab: index) }
         tabList.onClose = tabStrip.onClose
         tabList.onMove = tabStrip.onMove
+        tabList.onMenu = tabStrip.onMenu
         NotificationCenter.default.addObserver(self, selector: #selector(placeTabs(_:)),
                                                name: NSSplitView.didResizeSubviewsNotification, object: columns.splitView)
         tabList.onSelect = { [weak self] index in
@@ -218,15 +222,20 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     /// Asks whether to end the programs named, with the button that does it and Cancel.
     static func alert(_ question: String, button: String, running: [String]) -> NSAlert {
-        let names = running.filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let alert = NSAlert()
         alert.messageText = question
-        alert.informativeText = names.isEmpty
-            ? String(localized: "A program is running. Closing will end it.")
-            : String(localized: "\(ListFormatter.localizedString(byJoining: names)) is running. Closing will end it.")
+        alert.informativeText = ending(running)
         alert.addButton(withTitle: button)
         alert.addButton(withTitle: String(localized: "Cancel"))
         return alert
+    }
+
+    /// Which of the programs closing ends, in a sentence. The upaa command's sheet for closing a pane says it too.
+    static func ending(_ running: [String]) -> String {
+        let names = running.filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        return names.isEmpty
+            ? String(localized: "A program is running. Closing will end it.")
+            : String(localized: "\(ListFormatter.localizedString(byJoining: names)) is running. Closing will end it.")
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -404,10 +413,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     /// Opens a tab to the right of the selected one, in the focused pane's directory.
     @objc func newTab(_ sender: Any?) {
-        guard let terminal = makeTerminal(tabs[selected].focus.session.cwd) else { return NSSound.beep() }
-        watch(terminal)
-        tabs.insert(Tab(terminal), at: selected + 1)
-        select(selected + 1)
+        if openTab(after: tabs[selected].focus) == nil { NSSound.beep() }
     }
 
     /// Cmd-Shift-T. Opens the last closed tab again in its place, with a new shell in its directory; the program that
@@ -436,12 +442,12 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     /// Puts a new pane to the right of the focused one.
     @objc func splitRight(_ sender: Any?) {
-        split(vertical: true)
+        if split(tabs[selected].focus, vertical: true) == nil { NSSound.beep() }
     }
 
     /// Puts a new pane below the focused one.
     @objc func splitDown(_ sender: Any?) {
-        split(vertical: false)
+        if split(tabs[selected].focus, vertical: false) == nil { NSSound.beep() }
     }
 
     @objc func showNextPane(_ sender: Any?) {
@@ -528,10 +534,22 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         tabs.first { terminal.isDescendant(of: $0.top) }
     }
 
-    private func split(vertical: Bool) {
-        let tab = tabs[selected]
-        let pane = tab.focus
-        guard let terminal = makeTerminal(pane.session.cwd) else { return NSSound.beep() }
+    /// Opens a tab to the right of the pane's, in the pane's directory, and returns its pane.
+    func openTab(after pane: TerminalView) -> TerminalView? {
+        guard let index = tabs.firstIndex(where: { pane.isDescendant(of: $0.top) }),
+              let terminal = makeTerminal(pane.session.cwd) else { return nil }
+        watch(terminal)
+        tabs.insert(Tab(terminal), at: index + 1)
+        select(index + 1)
+        return terminal
+    }
+
+    /// Puts a new pane to the right of the pane (or below it), selecting its tab first, and returns the new pane.
+    func split(_ pane: TerminalView, vertical: Bool) -> TerminalView? {
+        guard let index = tabs.firstIndex(where: { pane.isDescendant(of: $0.top) }),
+              let terminal = makeTerminal(pane.session.cwd) else { return nil }
+        if index != selected { select(index) }
+        let tab = tabs[index]
         watch(terminal)
         let parent: NSSplitView
         if let split = pane.superview as? NSSplitView, split.isVertical == vertical {
@@ -547,6 +565,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         }
         equalize(parent)
         window.makeFirstResponder(terminal)
+        return terminal
     }
 
     /// Gives every pane of the split view the same size.
@@ -582,7 +601,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     /// Closes the pane; a tab's last pane closes the tab, and the last tab closes the window.
     /// A view and its session go away once they leave the window, which ends the shell.
-    private func close(_ terminal: TerminalView) {
+    func close(_ terminal: TerminalView) {
         guard let index = tabs.firstIndex(where: { terminal.isDescendant(of: $0.top) }) else { return }
         let tab = tabs[index]
         guard terminal !== tab.top, let split = terminal.superview as? NSSplitView else {
@@ -635,6 +654,77 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         tab.top.autoresizingMask = []
         host.addSubview(tab.top)
         host.needsLayout = true
+    }
+
+    // MARK: The upaa command (RemoteControl)
+
+    /// Every pane with its tab's place, and whether it has the keyboard.
+    var panes: [(pane: TerminalView, tab: Int, focused: Bool)] {
+        var panes: [(pane: TerminalView, tab: Int, focused: Bool)] = []
+        for (index, tab) in tabs.enumerated() {
+            for pane in tab.panes {
+                panes.append((pane: pane, tab: index, focused: window.isKeyWindow && index == selected && pane === tab.focus))
+            }
+        }
+        return panes
+    }
+
+    func contains(_ pane: TerminalView) -> Bool {
+        tab(of: pane) != nil
+    }
+
+    /// Selects the pane's tab and gives the pane the keyboard.
+    func focus(_ pane: TerminalView) {
+        guard let index = tabs.firstIndex(where: { pane.isDescendant(of: $0.top) }) else { return }
+        tabs[index].focus = pane
+        select(index)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Whether the upaa command may read, type into or close the pane, as its tab is set: at once when the tab allows or
+    /// denies it, otherwise from a sheet that asks, Deny by default. nil when the window already shows a sheet, since a
+    /// sheet queued behind it could not be taken down when the command goes away. Returns what takes the sheet down.
+    func allow(_ pane: TerminalView, _ question: String, detail: String, answer: @escaping (Bool?) -> Void)
+        -> (() -> Void)?
+    {
+        switch tab(of: pane)?.access {
+        case .allow: answer(true)
+        case .ask where window.attachedSheet != nil: answer(nil)
+        case .ask:
+            let alert = NSAlert()
+            alert.messageText = question
+            alert.informativeText = detail
+            alert.addButton(withTitle: String(localized: "Deny"))
+            alert.addButton(withTitle: String(localized: "Allow"))
+            alert.beginSheetModal(for: window) { answer($0 == .alertSecondButtonReturn) }
+            return { [weak self] in
+                if alert.window.sheetParent != nil { self?.window.endSheet(alert.window, returnCode: .cancel) }
+            }
+        case .deny, nil: answer(false)
+        }
+        return nil
+    }
+
+    /// The tab's menu, in the tab list and along the top: whether the upaa command may read, type into and close the
+    /// tab's panes. It starts at Ask Each Time and is not kept.
+    private func fillMenu(_ menu: NSMenu, tab index: Int) {
+        let tab = tabs[index]
+        menu.addItem(withTitle: String(localized: "Remote Control"), action: nil, keyEquivalent: "")
+        let choices: [(RemoteAccess, String)] = [
+            (.allow, String(localized: "Allow")), (.ask, String(localized: "Ask Each Time")), (.deny, String(localized: "Deny")),
+        ]
+        for (access, title) in choices {
+            let item = menu.addItem(withTitle: title, action: #selector(setAccess(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = access.rawValue
+            item.representedObject = tab
+            item.state = tab.access == access ? .on : .off
+            item.indentationLevel = 1
+        }
+    }
+
+    @objc private func setAccess(_ item: NSMenuItem) {
+        (item.representedObject as? Tab)?.access = RemoteAccess(rawValue: item.tag) ?? .ask
     }
 
     /// Reads the git state of the focused pane's directory, for the panel, the change count and the branch; and what

@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let terminals = NSHashTable<TerminalView>.weakObjects()
     private var settings: SettingsWindow?
     private var watchers: [DispatchSourceFileSystemObject] = []
+    /// The socket the upaa command reaches the app through from a pane, open while the config turns it on. Made with
+    /// the delegate, so that the panes' shells get its path from the first one on.
+    private let remote = RemoteControl()
     /// Points Cmd-+ and Cmd-− added to the config's size.
     private var zoom = 0.0
     private var fontSize: Double { min(200, max(4, config.fontSize + zoom)) }
@@ -36,11 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
         }
         watchConfig()
+        remote.windows = { [weak self] in self?.windows ?? [] }
+        remote.enabled = config.remoteControl
         UpdateCheck.run { [weak terminal = terminals.anyObject] message in terminal?.showNote(message) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        remote.enabled = false
         if let window = NSApp.orderedWindows.first(where: { $0.delegate is TabbedWindow }) { TabbedWindow.saveFrame(of: window) }
     }
 
@@ -130,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if new.fontSize != config.fontSize { zoom = 0 }
         config = new
         fontFamily = config.fontFamily
+        remote.enabled = config.remoteControl
         for terminal in terminals.allObjects {
             terminal.session.config = config
             terminal.session.setColors(dark: terminal.effectiveAppearance.isDark)

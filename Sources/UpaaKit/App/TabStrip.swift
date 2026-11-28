@@ -8,6 +8,8 @@ final class TabStrip: NSView {
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onMove: ((_ from: Int, _ to: Int) -> Void)?
+    /// Fills a tab's menu (a right click).
+    var onMenu: ((Int, NSMenu) -> Void)?
     /// The widest the strip may be, from the window's width.
     var room: CGFloat = 600 {
         didSet { invalidateIntrinsicContentSize() }
@@ -197,6 +199,14 @@ final class TabStrip: NSView {
         if let index = open.firstIndex(where: { $0.frame.minX...$0.frame.maxX ~= x }) { onClose?(index) }
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let x = pointer(event)
+        guard let index = open.firstIndex(where: { $0.frame.minX...$0.frame.maxX ~= x }) else { return nil }
+        let menu = NSMenu()
+        onMenu?(index, menu)
+        return menu
+    }
+
     /// Moves the tabs to their places as AppKit animates a view's frame.
     private func slide() {
         needsLayout = true
@@ -304,6 +314,9 @@ private final class Tab: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// The strip's menu for the tab.
+    override func menu(for event: NSEvent) -> NSMenu? { superview?.menu(for: event) }
 
     override func mouseEntered(with event: NSEvent) { hovering = true }
 

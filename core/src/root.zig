@@ -153,6 +153,11 @@ export fn upaa_session_cwd(session: *Session, out: [*]u8, cap: usize) usize {
     return session.cwd(out[0..cap]);
 }
 
+/// The shell's process ID, which the upaa command names a pane by (#65).
+export fn upaa_session_pid(session: *Session) i32 {
+    return session.pty.child;
+}
+
 /// The program in the terminal's foreground when it is not the shell. Returns its name's length (0 if the name cannot
 /// be read), -1 while the shell has the terminal.
 export fn upaa_session_running(session: *Session, out: [*]u8, cap: usize) isize {

@@ -101,3 +101,25 @@
 "config line %lld: expected key = value" = "config %lld行目: key = value の形になっていません";
 "Font not found: %@" = "フォントが見つかりません: %@";
 "%@ (%lld more)" = "%@（ほか%lld件）";
+
+/* The upaa command from a pane (RemoteControl): the tab's menu, the sheet that asks, and the command's messages */
+"Remote Control" = "リモート操作";
+"Allow" = "許可";
+"Ask Each Time" = "都度確認";
+"Deny" = "拒否";
+"Allow reading this pane’s screen?" = "このペインの画面を読ませますか？";
+"Allow closing this pane?" = "このペインを閉じさせますか？";
+"Allow typing into this pane?" = "このペインに入力させますか？";
+"Pane %@ in “%@”." = "「%2$@」のペイン %1$@。";
+"Asked by pane %@ in “%@”." = "頼んだのは「%2$@」のペイン %1$@ です。";
+"Asked by an unknown process." = "頼んだのは不明なプロセスです。";
+"A pane's ID is its shell's process ID, as upaa list shows. Without --pane, the command acts on the pane it runs in." = "ペインの ID はそのシェルのプロセス ID で、upaa list で見られます。--pane を省くと、コマンドを実行したペインが対象です。";
+"No pane %@." = "ペイン %@ はありません。";
+"Name the pane with --pane: this process is not in an upaa pane." = "--pane でペインを指定してください。このプロセスは upaa のペインの中にありません。";
+"Could not start a shell." = "シェルを起動できませんでした。";
+"The tab did not allow this." = "タブがこの操作を許可しませんでした。";
+"The window is already asking something. Answer it, then try again." = "ウィンドウがほかのことを確認中です。それに答えてから、もう一度試してください。";
+"Run this in an upaa pane." = "upaa のペインの中で実行してください。";
+"Remote control is off. Add “remote-control = true” to %@." = "リモート操作が無効です。%@ に「remote-control = true」を書いてください。";
+"upaa did not answer." = "upaa から返事がありませんでした。";
+"The answer from upaa was cut off." = "upaa からの返事が途中で切れました。";

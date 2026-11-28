@@ -21,6 +21,8 @@ background_opacity: f64 = 0.8,
 /// Cells.
 window_width: u16 = 80,
 window_height: u16 = 24,
+/// Whether the app opens the socket that the upaa command reaches it through from a pane (#65).
+remote_control: bool = false,
 /// null takes design A3's color for light or dark mode (Theme).
 foreground: ?vt.GhosttyColorRgb = null,
 background: ?vt.GhosttyColorRgb = null,
@@ -50,6 +52,7 @@ pub const Values = extern struct {
     /// The lines that could not be read.
     problems: [*]const Problem,
     problem_count: usize,
+    remote_control: bool,
 };
 
 pub fn parse(text: []const u8) Config {
@@ -83,6 +86,7 @@ pub fn values(config: *const Config) Values {
         .window_height = config.window_height,
         .problems = &config.problems,
         .problem_count = config.problem_count,
+        .remote_control = config.remote_control,
     };
 }
 
@@ -155,6 +159,8 @@ fn set(config: *Config, key: []const u8, value: []const u8) error{ UnknownKey, I
         config.window_width = try cells(value, 10);
     } else if (std.mem.eql(u8, key, "window-height")) {
         config.window_height = try cells(value, 4);
+    } else if (std.mem.eql(u8, key, "remote-control")) {
+        config.remote_control = if (std.mem.eql(u8, value, "true")) true else if (std.mem.eql(u8, value, "false")) false else return error.InvalidValue;
     } else if (std.mem.eql(u8, key, "foreground")) {
         config.foreground = try color(value);
     } else if (std.mem.eql(u8, key, "background")) {
@@ -253,6 +259,17 @@ test "settings, and the lines that cannot be read" {
     const many = parse(&lines);
     try std.testing.expectEqual(@as(usize, 32), many.values().problem_count);
     try std.testing.expectEqual(Problem{ .line = 32, .key_start = 0, .key_len = 0, .kind = .not_key_value }, many.problems[31]);
+}
+
+test "remote control is off unless the file turns it on" {
+    const off = parse("");
+    try std.testing.expect(!off.values().remote_control);
+    const on = parse("remote-control = true");
+    try std.testing.expect(on.values().remote_control);
+    const bad = parse("remote-control = true\nremote-control = yes");
+    try std.testing.expect(bad.values().remote_control);
+    const v = bad.values();
+    try std.testing.expectEqualSlices(Problem, &.{.{ .line = 2, .key_start = 22, .key_len = 14, .kind = .invalid_value }}, v.problems[0..v.problem_count]);
 }
 
 test "each font-family line after the first adds a fallback, and an empty one starts again" {

@@ -160,6 +160,9 @@ final class TerminalSession {
         return n > 0 ? String(decoding: out.prefix(n), as: UTF8.self) : nil
     }
 
+    /// The shell's process ID, which the upaa command names the pane by.
+    var pid: Int32 { upaa_session_pid(handle) }
+
     /// The program the shell is running in the foreground (such as vim or claude), "" if its name cannot be read, or nil
     /// while the shell itself waits for input.
     var running: String? {

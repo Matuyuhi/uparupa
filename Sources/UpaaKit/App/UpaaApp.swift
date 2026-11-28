@@ -4,6 +4,8 @@ import CUpaaCore
 /// Entry point of the app. The executable (Sources/upaa/main.swift) calls only this.
 ///
 /// Arguments:
+///   list, focus, new-tab, split, read, close, send ...
+///                                        From a pane, act on the app's tabs and panes (RemoteControl)
 ///   --version                            Print the version and exit
 ///   --snapshot <png> [--command <command>] [--input <string>]
 ///                                        Send a string to the shell (or to --command if given), write the resulting screen to a PNG, and exit
@@ -14,6 +16,9 @@ import CUpaaCore
 public enum UpaaApp {
     public static func main() -> Never {
         let arguments = CommandLine.arguments
+        if arguments.count > 1, !arguments[1].hasPrefix("-") {
+            exit(RemoteControl.run(Array(arguments.dropFirst())))
+        }
 
         if arguments.contains("--version") {
             print(String(cString: upaa_version()))

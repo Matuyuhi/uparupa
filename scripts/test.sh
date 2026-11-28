@@ -2,8 +2,9 @@
 # Run the same tests locally and in CI.
 #   1. Zig tests
 #   2. App build
-#   3. Compare exported screens with the baseline images (tests/snapshots/)
-#   4. Whether speed is outside the lower or upper bound
+#   3. The upaa command against a stand-in for the app's socket (tests/remote-answer.py)
+#   4. Compare exported screens with the baseline images (tests/snapshots/)
+#   5. Whether speed is outside the lower or upper bound
 # With UPDATE_SNAPSHOTS=1, the baseline images are replaced with the current rendering.
 set -eu
 cd "$(dirname "$0")/.."
@@ -12,6 +13,8 @@ zig build test --summary all
 
 CONFIG=release sh scripts/build-app.sh
 BIN=build/upaa.app/Contents/MacOS/upaa
+
+python3 -I tests/remote-answer.py "$BIN"
 
 mkdir -p build/snapshots tests/snapshots
 for vt in tests/fixtures/*.vt; do
