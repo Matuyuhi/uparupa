@@ -1,0 +1,17 @@
+# Dependabot opens one pull request a week for the actions the workflows use, and updates actions.lock in it.
+# Swift and Zig have no packages to update here (Package.swift links only the local libghostty-vt XCFramework,
+# build.zig.zon has no dependencies). libghostty-vt and the Zig toolchain are checked by upstream-check.yml instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "依存の更新:"

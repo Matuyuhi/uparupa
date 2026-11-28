@@ -3,6 +3,7 @@ name: review
 # Claude reviews a pull request when it is opened as ready, a draft is marked ready for review, or a push lands on it.
 # The review ends with a verdict line, which the last step turns into the label ready-to-merge or needs-human.
 # A draft only loses the label. Pull requests from forks are skipped: their token cannot label, and they get no label.
+# Dependabot's pull requests are skipped too: their workflows cannot read CLAUDE_CODE_OAUTH_TOKEN.
 on:
   pull_request:
     types: [opened, ready_for_review, synchronize, converted_to_draft]
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   review:
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -78,7 +79,7 @@ jobs:
             echo "verdict: ${verdict:-none}"
             # Changes to how pull requests are checked, built, installed or released, and reference images, are for a person to look at.
             paths="$(printf '%s\n' "$files" \
-              | grep -E '^(\.github/|CLAUDE\.md$|build\.zig\.zon$|install\.sh$|scripts/(upaa-launcher|fetch-ghostty-vt)\.sh$|tests/snapshots/|LICENSE$|THIRD_PARTY_LICENSES\.md$)' || true)"
+              | grep -E '^(\.github/|CLAUDE\.md$|build\.zig\.zon$|install\.sh$|scripts/(upaa-launcher|fetch-ghostty-vt|fetch-zig)\.sh$|tests/snapshots/|LICENSE$|THIRD_PARTY_LICENSES\.md$)' || true)"
             [ -z "$paths" ] || printf 'paths for a person:\n%s\n' "$paths"
             if [ "$verdict" = "判定: マージ可" ] && [ -z "$paths" ]; then label=ready-to-merge; fi
           fi

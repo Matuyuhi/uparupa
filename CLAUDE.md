@@ -7,7 +7,7 @@ Progress, remaining work, and unconfirmed items are tracked in GitHub Issues (la
 ## Decided
 
 - Target is macOS 13 or later on Apple Silicon (arm64) only. No cross-platform support.
-- The language is a mix of Swift and Zig. UI, IME, and Metal calls are in Swift. The rest of the core (PTY, libghostty-vt calls, building drawing data, glyph cache) is in Zig. Zig is 0.17.x.
+- The language is a mix of Swift and Zig. UI, IME, and Metal calls are in Swift. The rest of the core (PTY, libghostty-vt calls, building drawing data, glyph cache) is in Zig. Zig is 0.17.x. CI and releases build with the exact version that `scripts/fetch-zig.sh` fetches.
 - Zig was chosen because the user wants to write in it. If the mix costs noticeable performance or effort, say so plainly; the fallback is a core in C.
 - Build uses SwiftPM and `scripts/build-app.sh` (`zig build` → `swift build` → `build/upaa.app`).
 - The prebuilt libghostty-vt XCFramework is fetched by `scripts/fetch-ghostty-vt.sh`. It is not included in the repository.

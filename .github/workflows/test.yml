@@ -36,13 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      # Do not fetch again unless the fetch script (which pins the version and SHA-256) changes.
-      - name: libghostty-vt cache
-        id: ghostty-vt
+      # libghostty-vt and Zig. Do not fetch again unless a fetch script (which pins the version) changes.
+      - name: Fetched dependencies cache
+        id: vendor
         uses: actions/cache@v6.1.0
         with:
-          path: vendor/ghostty-vt
-          key: ghostty-vt-${{ hashFiles('scripts/fetch-ghostty-vt.sh') }}
+          path: |
+            vendor/ghostty-vt
+            vendor/zig
+          key: vendor-${{ hashFiles('scripts/fetch-ghostty-vt.sh', 'scripts/fetch-zig.sh') }}
 
       # Intermediate outputs of Zig and SwiftPM. Rebuilt only for the parts whose sources changed.
       - name: Build cache
@@ -55,20 +57,18 @@ jobs:
           key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**') }}
           restore-keys: build-${{ runner.os }}-
 
-      - name: Install Zig
-        run: |
-          brew install zig
-          # libghostty-vt 1.0.x and build.zig assume Zig 0.17.x.
-          zig version | grep -q '^0\.17\.' || { echo "Zig 0.17.x is required: $(zig version)"; exit 1; }
-
       - name: Install Metal Toolchain
         run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
 
-      - name: Fetch libghostty-vt
-        if: steps.ghostty-vt.outputs.cache-hit != 'true'
+      - name: Fetch libghostty-vt and Zig
+        if: steps.vendor.outputs.cache-hit != 'true'
         run: |
           brew install minisign
           sh scripts/fetch-ghostty-vt.sh
+          sh scripts/fetch-zig.sh
+
+      - name: Put Zig on the PATH
+        run: echo "$PWD/vendor/zig" >> "$GITHUB_PATH"
 
       - name: Test
         run: sh scripts/test.sh
