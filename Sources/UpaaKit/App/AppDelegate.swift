@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showSettings(_ sender: Any?) {
         let settings = settings ?? SettingsWindow(
             families: config.fontFamilies, size: config.fontSize, mascot: config.mascot, problems: problems,
-            onFont: { [weak self] in self?.save { try Config.saveFont(families: $0, size: $1) } },
+            onFont: { [weak self] families, size in self?.save { try Config.saveFont(families: families, size: size) } },
             onMascot: { [weak self] on in self?.save { try Config.saveMascot(on) } })
         self.settings = settings
         settings.showWindow(nil)
