@@ -1,0 +1,169 @@
+name: measure
+
+# Every Monday at 9:00 in Japan, measures how big and how fast upaa is (scripts/measure.sh) and keeps the numbers in
+# one Issue with the label measurements, edited each week, with what got worse since the last run. A run that finds
+# something worse also comments on the Issue, so it notifies. Then Claude reads the numbers and the code and files
+# what could be lighter or faster as Issues; it pushes nothing.
+# A pull request that changes the measuring only measures, to show the numbers in its run.
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/measure.sh
+      - .github/workflows/measure.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: measure-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    # The same runner as test.yml, so the numbers are comparable with it and from week to week.
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # Only the fetched dependencies, as in test.yml. No build cache, so the build times are of a cold build.
+      - name: Fetched dependencies cache
+        id: vendor
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            vendor/ghostty-vt
+            vendor/zig
+          key: vendor-${{ hashFiles('scripts/fetch-ghostty-vt.sh', 'scripts/fetch-zig.sh') }}
+
+      - name: Install Metal Toolchain
+        run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+
+      - name: Fetch libghostty-vt and Zig
+        if: steps.vendor.outputs.cache-hit != 'true'
+        run: |
+          brew install minisign
+          sh scripts/fetch-ghostty-vt.sh
+          sh scripts/fetch-zig.sh
+
+      - name: Put Zig on the PATH
+        run: echo "$PWD/vendor/zig" >> "$GITHUB_PATH"
+
+      - name: Measure
+        run: |
+          sh scripts/measure.sh
+          jq -r 'to_entries[] | "| \(.key) | \(.value) |"' build/measure/results.json \
+            | { printf '| Measure | Value |\n|---|---|\n'; cat; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: measurements
+          path: build/measure/results.json
+
+  report:
+    needs: measure
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Update the measurements Issue
+        run: |
+          gh run download "$GITHUB_RUN_ID" --name measurements --dir .
+          gh label create measurements --color 5319e7 --description "Weekly numbers of how big and how fast upaa is" --force
+          issue="$(gh issue list --label measurements --state open --limit 1 --json number --jq '.[0].number // empty')"
+          prev='{}'
+          if [ -n "$issue" ]; then
+            prev="$(gh issue view "$issue" --json body --jq .body | sed -n 's/^<!-- measurements: \(.*\) -->$/\1/p')"
+            [ -n "$prev" ] || prev='{}'
+          fi
+          # Worse means more than 25% worse and by more than the noise floor of its unit. Shared runners are noisy,
+          # so one bad week is a hint to look, not proof.
+          jq -rn --argjson cur "$(cat results.json)" --argjson prev "$prev" '
+            def floor: if endswith("_percent") then 1 elif endswith("_ms") then 0.05 elif endswith("_kib") then 16
+              elif endswith("_mib") then 2 else 0.1 end;
+            def worse($k; $a; $b): if $k | endswith("_per_s") then $a < $b * 0.75 and $b - $a > 1
+              else $a > $b * 1.25 and $a - $b > ($k | floor) end;
+            [$cur | to_entries[] | .key as $k | .value as $a | $prev[$k] as $b
+              | { k: $k, a: $a, b: $b, worse: ($b != null and worse($k; $a; $b)),
+                  change: (if $b == null or $b == 0 then "" else "\((($a - $b) / $b * 100) | round)%" end) }]
+            | (map(select(.worse) | .k) | join(", ")) as $worse
+            | "\(if $worse == "" then "Nothing got worse since the last run." else "Worse than the last run: \($worse)" end)\n",
+              "| Measure | This run | Last run | Change |", "|---|---|---|---|",
+              (.[] | "| \(.k) | \(.a)\(if .worse then " ⚠️" else "" end) | \(.b // "") | \(.change) |"),
+              "", "WORSE=\($worse)"' > report.txt
+          worse="$(sed -n 's/^WORSE=//p' report.txt)"
+          {
+            echo "Weekly measurements of upaa on the macOS runner (\`scripts/measure.sh\`), at $GITHUB_SHA on $(date -u +%Y-%m-%d)."
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            grep -v '^WORSE=' report.txt
+            echo
+            echo "Names ending in _per_s are better higher; all others are better lower."
+            echo
+            echo "<!-- measurements: $(jq -c . results.json) -->"
+          } > body.md
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body-file body.md
+          else
+            issue="$(gh issue create --title "週ごとの計測（サイズと速さ）" --label measurements --body-file body.md | sed 's#.*/##')"
+          fi
+          if [ -n "$worse" ]; then
+            gh issue comment "$issue" --body "Worse than the last run: $worse. See the table above."
+          fi
+
+  # Claude reads the numbers and the code, and files ways to make upaa lighter or faster. It can only read the
+  # repository and write Issues; it pushes nothing. Skipped without the CLAUDE_CODE_OAUTH_TOKEN secret.
+  suggest:
+    needs: report
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - if: env.HAS_TOKEN == 'true'
+        uses: actions/checkout@v7.0.1
+
+      - if: env.HAS_TOKEN == 'true'
+        uses: anthropics/claude-code-action@v1.0.290
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --model opus
+            --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue create:*),Bash(gh issue comment:*)"
+          prompt: |
+            REPO: ${{ github.repository }}
+
+            You look for ways to make upaa lighter and faster. Read CLAUDE.md first and follow it, above all
+            "Implementation approach": fewer lines is better, fix causes rather than add workarounds, and add nothing
+            only for measuring.
+
+            1. Read this week's numbers in the Issue with the label measurements: `gh issue list --label measurements`,
+               then `gh issue view <number>`. scripts/measure.sh says how each is taken. Shared runners are noisy.
+            2. Read the code that runs often or holds memory: drawing (Sources/UpaaKit/Render, core/src/render),
+               the PTY read thread and the session (core/src/term), the glyph atlas (core/src/font), and the timers and
+               polling in Sources/UpaaKit/App. Look at what changed this week with `git log --since="8 days ago"`.
+            3. List the open Issues (`gh issue list --state open --limit 200`) so you file nothing already there.
+            4. For something that got worse this week, find the commit that likely caused it and comment on the
+               measurements Issue with it and a fix.
+            5. File at most two new Issues, only for wins you can tie to a line of code and a number (measured, or
+               worked out from the code, saying which). Title in Japanese; body in short plain English: what costs
+               what now, the proposed fix, how to check it, and whether users would see a change. Use the label
+               investigation. File nothing if you find nothing worth it.
