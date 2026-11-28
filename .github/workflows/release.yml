@@ -62,10 +62,11 @@ jobs:
           number="${1:-}"; open="${2:-}"
           [ -n "$number" ] || { echo "No milestone is named $version"; exit 1; }
           [ "$open" = 0 ] || { echo "Milestone $version still has $open open issues or pull requests"; exit 1; }
-          # A patch release holds only fixes: every item in its milestone has the label bug.
+          # A patch release holds only fixes: every item it ships (a merged pull request or a completed issue) has the label bug.
           if [ "${version##*.}" != 0 ]; then
             others="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?milestone=$number&state=all&per_page=100" \
-              --jq '.[] | select(all(.labels[]; .name != "bug")) | "#\(.number)"' | tr '\n' ' ')"
+              --jq '.[] | select(if .pull_request then .pull_request.merged_at else .state_reason == "completed" end)
+                | select(all(.labels[]; .name != "bug")) | "#\(.number)"' | tr '\n' ' ')"
             [ -z "$others" ] || { echo "$version is a patch version, but $others are not labelled bug. Run bump-version.yml with part=minor"; exit 1; }
           fi
 
