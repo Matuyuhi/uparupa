@@ -15,6 +15,16 @@ bool upaa_version_is_newer(const char *candidate);
 
 typedef struct UpaaConfig UpaaConfig;
 
+// A line that could not be read. The app words it, in the user's language.
+typedef struct {
+    uint32_t line;
+    // Where the line's key is in the text passed to upaa_config_new, in bytes. Empty for UPAA_CONFIG_NOT_KEY_VALUE.
+    uint32_t key_start;
+    uint32_t key_len;
+    uint8_t kind;
+} UpaaConfigProblem;
+enum { UPAA_CONFIG_NOT_KEY_VALUE = 0, UPAA_CONFIG_UNKNOWN_KEY = 1, UPAA_CONFIG_INVALID_VALUE = 2 };
+
 typedef struct {
     // The font, then its fallbacks, one per line (one font-family line each). NUL-terminated. Valid while the config lives.
     const char *font_family;
@@ -25,8 +35,9 @@ typedef struct {
     // Cells.
     uint16_t window_width;
     uint16_t window_height;
-    // The lines that could not be read, one per line (ASCII), or NULL. Valid while the config lives.
-    const char *problems;
+    // The lines that could not be read, as many as fit. Valid while the config lives.
+    const UpaaConfigProblem *problems;
+    size_t problem_count;
 } UpaaConfigValues;
 
 // Reads the text of the config file (UTF-8). Settings it does not name keep their defaults. NULL only when out of memory.

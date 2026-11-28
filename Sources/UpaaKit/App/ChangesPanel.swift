@@ -94,18 +94,19 @@ final class ChangesPanel: NSView {
             add(Chrome.label(String(localized: "Not a git repository"), size: 11, color: .secondaryLabelColor), inset: 6)
             return
         }
-        add(Chrome.label(([String(localized: "Changes")] + [state.branch].compactMap { $0 }).joined(separator: " · "), size: 11,
-                         weight: .semibold, color: .secondaryLabelColor), inset: 6)
+        let count = state.files.count
+        add(Chrome.label(count == 1 ? String(localized: "Changes · 1 file") : String(localized: "Changes · \(count) files"),
+                         size: 11, weight: .semibold, color: .secondaryLabelColor), inset: 6)
         if state.files.isEmpty { add(Chrome.label(String(localized: "No changes"), size: 12, color: .secondaryLabelColor), inset: 6, top: 6) }
         for file in state.files {
             let selected = file.path == state.selected
             var views: [NSView] = [Chrome.label(file.path, size: 12, weight: selected ? .medium : .regular, mono: true)]
             views.append(NSView())
             if file.isNew {
-                views.append(Chrome.label(String(localized: "New"), size: 11, color: .systemGreen))
+                views.append(Chrome.label(String(localized: "New"), size: 11, color: Chrome.added))
             }
-            if let added = file.added { views.append(Chrome.label("+\(added)", size: 11, mono: true, color: .systemGreen)) }
-            if let removed = file.removed { views.append(Chrome.label("−\(removed)", size: 11, mono: true, color: .systemRed)) }
+            if let added = file.added { views.append(Chrome.label("+\(added)", size: 11, mono: true, color: Chrome.added)) }
+            if let removed = file.removed { views.append(Chrome.label("−\(removed)", size: 11, mono: true, color: Chrome.removed)) }
             let row = Clickable(cornerRadius: 9, selected: selected, views, spacing: 6,
                                 padding: NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8))
             row.onClick = { [weak self] in self?.select(file.path) }
@@ -144,10 +145,15 @@ final class ChangesPanel: NSView {
                                Chrome.sidePanelWidth / 3)
         let label = WrappingLabel(wrappingLabelWithString: "")
         // The extra height of a line goes above its text, so the text moves up by half of it to sit in the middle.
-        label.attributedStringValue = NSAttributedString(string: String(line), attributes: [
+        let text = NSMutableAttributedString(string: String(line), attributes: [
             .font: font, .paragraphStyle: style, .baselineOffset: (17 - font.ascender + font.descender) / 2,
             .foregroundColor: line.hasPrefix("@@") ? NSColor.secondaryLabelColor : .labelColor,
         ])
+        if line.hasPrefix("+") || line.hasPrefix("-") {
+            text.addAttribute(.foregroundColor, value: line.hasPrefix("+") ? Chrome.added : Chrome.removed,
+                              range: NSRange(location: 0, length: 1))
+        }
+        label.attributedStringValue = text
         label.isSelectable = false
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let fill = Fill(line.hasPrefix("+") ? Chrome.addedLine : line.hasPrefix("-") ? Chrome.removedLine : .clear)
