@@ -83,6 +83,9 @@
 "%@ is available (current %@). Run: upaa update" = "%1$@ が出ています（いまは %2$@）。更新: upaa update";
 
 /* What in the config could not be used (footer and Settings) */
+"config line %lld: unknown key \"%@\"" = "config %lld行目: \"%@\" は不明なキーです";
+"config line %lld: invalid value for \"%@\"" = "config %lld行目: \"%@\" の値が正しくありません";
+"config line %lld: expected key = value" = "config %lld行目: key = value の形になっていません";
 "Font not found: %@" = "フォントが見つかりません: %@";
 "%@ (%lld more)" = "%@（ほか%lld件）";
 
