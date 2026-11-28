@@ -347,7 +347,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuI
         case Self.splitRight: return button(identifier, "rectangle.split.2x1", String(localized: "Split Right (⌘D)"), #selector(splitRight(_:)))
         case Self.splitDown: return button(identifier, "rectangle.split.1x2", String(localized: "Split Down (⇧⌘D)"), #selector(splitDown(_:)))
         case Self.findButton: return button(identifier, "magnifyingglass", String(localized: "Find (⌘F)"), #selector(showFindBar(_:)))
-        case Self.panelButton: return button(identifier, "sidebar.right", String(localized: "Right Panel"), #selector(togglePanel(_:)))
+        case Self.panelButton: return button(identifier, "sidebar.right", String(localized: "Show or Hide Right Panel"), #selector(togglePanel(_:)))
         case Self.panelSwitchItem:
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.view = panelSwitch
