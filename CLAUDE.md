@@ -77,10 +77,10 @@ Each open pull request, and each open issue that is worked on without a pull req
   gh api --paginate 'repos/Matuyuhi/upaa/issues?state=open&per_page=100' --jq '.[] | "\([.labels[].name|select(startswith("status: "))][0] // "not started")\t#\(.number) \(if .pull_request then "PR" else "issue" end) \(.title)"' | sort
   ```
 
-- After a push, wait for CI and the review in the same turn instead of ending it. The runs can take a few seconds to appear, so wait for them first, and run the command again if it times out. A skipped run (a draft's review) also exits non-zero.
+- After a push, wait for CI and the review in the same turn instead of ending it. The runs take a few seconds to appear; run the command again if it times out. Then check that each run's conclusion is `success`; a draft's review is `skipped`.
 
   ```
-  sha=$(git rev-parse HEAD); until ids=$(gh run list -c "$sha" --json databaseId --jq '.[].databaseId') && [ -n "$ids" ]; do sleep 10; done; for id in $ids; do gh run watch "$id" --exit-status; done
+  sha=$(git rev-parse HEAD); sleep 30; while gh run list -c "$sha" --json status --jq '.[].status' | grep -qv completed; do sleep 20; done; gh run list -c "$sha"
   ```
 
   `gh pr checks <N> --watch` does the same on the Mac, but not in Claude Code cloud sessions, which have no GitHub GraphQL.
