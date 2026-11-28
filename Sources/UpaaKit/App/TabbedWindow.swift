@@ -222,15 +222,20 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     /// Asks whether to end the programs named, with the button that does it and Cancel.
     static func alert(_ question: String, button: String, running: [String]) -> NSAlert {
-        let names = running.filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let alert = NSAlert()
         alert.messageText = question
-        alert.informativeText = names.isEmpty
-            ? String(localized: "A program is running. Closing will end it.")
-            : String(localized: "\(ListFormatter.localizedString(byJoining: names)) is running. Closing will end it.")
+        alert.informativeText = ending(running)
         alert.addButton(withTitle: button)
         alert.addButton(withTitle: String(localized: "Cancel"))
         return alert
+    }
+
+    /// Which of the programs closing ends, in a sentence. The upaa command's sheet for closing a pane says it too.
+    static func ending(_ running: [String]) -> String {
+        let names = running.filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        return names.isEmpty
+            ? String(localized: "A program is running. Closing will end it.")
+            : String(localized: "\(ListFormatter.localizedString(byJoining: names)) is running. Closing will end it.")
     }
 
     func windowWillClose(_ notification: Notification) {

@@ -169,6 +169,7 @@ final class RemoteControl {
                 String(localized: "Asked by pane \(String($0.session.pid)) in “\($0.session.title ?? "upaa")”.")
             } ?? String(localized: "Asked by an unknown process.")
             if command == "send" { detail += "\n\n" + Self.visible(words[0]) }
+            if command == "close", !pane.session.programs.isEmpty { detail += "\n\n" + TabbedWindow.ending(pane.session.programs) }
             let withdraw = window.allow(pane, question, detail: detail) { allowed in
                 connection.withdraw = nil
                 guard connection.isOpen else { return }
