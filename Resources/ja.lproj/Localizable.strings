@@ -25,7 +25,8 @@
 "Find Previous" = "前を検索";
 "View" = "表示";
 "Show Sidebar" = "サイドバーを表示";
-"Changes Panel" = "右パネル";
+"Changes Panel" = "変更パネル";
+"Links Panel" = "リンクパネル";
 "Default Font Size" = "デフォルトのフォントサイズ";
 "Bigger" = "拡大";
 "Smaller" = "縮小";
@@ -44,7 +45,8 @@
 "New output" = "新しい出力";
 "Split Right (⌘D)" = "縦に分割 (⌘D)";
 "Split Down (⇧⌘D)" = "横に分割 (⇧⌘D)";
-"Changes Panel (⌘J)" = "右パネル (⌘J)";
+"Changes Panel (⌘J)" = "変更パネル (⌘J)";
+"Links Panel (⇧⌘J)" = "リンクパネル (⇧⌘J)";
 "Find (⌘F)" = "検索 (⌘F)";
 "Close Find" = "検索を閉じる";
 "⌘D Split · ⌘F Find · ⌘B Tabs" = "⌘D 分割 · ⌘F 検索 · ⌘B タブ一覧";
@@ -69,6 +71,17 @@
 "Changes" = "変更";
 "No changes" = "変更はありません";
 "New" = "新規";
+
+/* Links panel */
+"Links in This Session" = "このセッションに出たリンク";
+"No links yet" = "まだリンクはありません";
+"Other" = "その他";
+"PR #%lld" = "PR #%lld";
+"Issue #%lld" = "Issue #%lld";
+"Discussion #%lld" = "Discussion #%lld";
+"Notion page" = "Notion のページ";
+"Open Link" = "リンクを開く";
+"Copy Link" = "リンクをコピー";
 
 /* Settings */
 "Settings" = "設定";
