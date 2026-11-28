@@ -70,17 +70,16 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      # Build the release artifacts from a clean state every time. Do not use the cache from the test workflow.
-      - name: Install Zig and minisign
-        run: |
-          brew install zig minisign
-          zig version | grep -q '^0\.17\.' || { echo "Zig 0.17.x is required: $(zig version)"; exit 1; }
-
       - name: Install Metal Toolchain
         run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
 
-      - name: Fetch libghostty-vt
-        run: sh scripts/fetch-ghostty-vt.sh
+      # Build the release artifacts from a clean state every time. Do not use the cache from the test workflow.
+      - name: Fetch libghostty-vt and Zig
+        run: |
+          brew install minisign
+          sh scripts/fetch-ghostty-vt.sh
+          sh scripts/fetch-zig.sh
+          echo "$PWD/vendor/zig" >> "$GITHUB_PATH"
 
       - name: Test (the release build is also made here)
         run: sh scripts/test.sh

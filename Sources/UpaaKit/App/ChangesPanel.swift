@@ -20,7 +20,7 @@ final class ChangesPanel: NSView {
         var diff: [Substring]
     }
 
-    /// After each read: the branch, nil outside a git repository, and how many files have changed.
+    /// After each read: the branch (nil outside a git repository or on a detached HEAD), and how many files have changed.
     var onUpdate: ((_ branch: String?, _ changes: Int) -> Void)?
 
     private var state: State?
@@ -94,9 +94,8 @@ final class ChangesPanel: NSView {
             add(Chrome.label(String(localized: "Not a git repository"), size: 11, color: .secondaryLabelColor), inset: 6)
             return
         }
-        let count = state.files.count
-        add(Chrome.label(count == 1 ? String(localized: "Changes · 1 file") : String(localized: "Changes · \(count) files"),
-                         size: 11, weight: .semibold, color: .secondaryLabelColor), inset: 6)
+        add(Chrome.label(([String(localized: "Changes")] + [state.branch].compactMap { $0 }).joined(separator: " · "), size: 11,
+                         weight: .semibold, color: .secondaryLabelColor), inset: 6)
         if state.files.isEmpty { add(Chrome.label(String(localized: "No changes"), size: 12, color: .secondaryLabelColor), inset: 6, top: 6) }
         for file in state.files {
             let selected = file.path == state.selected
@@ -174,7 +173,9 @@ final class ChangesPanel: NSView {
         guard let root = git(["rev-parse", "--show-toplevel"], in: directory)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !root.isEmpty
         else { return nil }
-        let branch = git(["rev-parse", "--abbrev-ref", "HEAD"], in: root)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty on a detached HEAD, which then shows no branch. A repository with no commit yet still has its branch.
+        let branch = (git(["branch", "--show-current"], in: root)?.trimmingCharacters(in: .whitespacesAndNewlines))
+            .flatMap { $0.isEmpty ? nil : $0 }
         // A repository with no commit yet has no HEAD, so only its new files show.
         var files = (git(["diff", "HEAD", "--numstat"], in: root) ?? "").split(separator: "\n").compactMap { line -> File? in
             let parts = line.split(separator: "\t", maxSplits: 2)

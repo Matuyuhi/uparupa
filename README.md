@@ -80,10 +80,12 @@ Colors are `#rrggbb`, `#rgb` or an X11 name. Without `foreground`, `background` 
 
 ## Development
 
-You need Xcode 27 (with the Metal Toolchain), Zig 0.17.x and minisign.
+You need Xcode 27 (with the Metal Toolchain) and minisign. CI and releases build with the Zig that `scripts/fetch-zig.sh` fetches; use the same one.
 
 ```sh
 sh scripts/fetch-ghostty-vt.sh   # download libghostty-vt (signature and SHA-256 are verified)
+sh scripts/fetch-zig.sh          # download the pinned Zig into vendor/zig (signature and version are verified)
+export PATH="$PWD/vendor/zig:$PATH"
 sh scripts/build-app.sh          # build build/upaa.app
 sh scripts/test.sh               # run all tests
 ```
