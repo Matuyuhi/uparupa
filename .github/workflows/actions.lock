@@ -5,6 +5,11 @@ version: 'v0.0.3'
 workflows:
     '.github/workflows/bump-version.yml':
         - 'actions/checkout@v7.0.1'
+    '.github/workflows/measure.yml':
+        - 'actions/cache@v6.1.0'
+        - 'actions/checkout@v7.0.1'
+        - 'actions/upload-artifact@v7.0.2'
+        - 'anthropics/claude-code-action@v1.0.290'
     '.github/workflows/release.yml':
         - 'actions/attest-build-provenance@v4.2.2'
         - 'actions/checkout@v7.0.1'
