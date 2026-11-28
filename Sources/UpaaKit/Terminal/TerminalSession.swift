@@ -168,6 +168,15 @@ final class TerminalSession {
         return n < 0 ? nil : String(decoding: out.prefix(n), as: UTF8.self)
     }
 
+    /// The programs on the terminal other than the shell: the one in the foreground, and jobs in the background or
+    /// stopped, which closing also ends. A name is "" if it cannot be read. Empty while only the shell is there.
+    var programs: [String] {
+        var out = [UInt8](repeating: 0, count: 1024)
+        let n = upaa_session_programs(handle, &out, out.count)
+        return String(decoding: out.prefix(n), as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+            .dropLast().map(String.init)
+    }
+
     /// The title the program set (OSC 0 or 2), or nil if it set none.
     var title: String? {
         var out = [UInt8](repeating: 0, count: 1024)

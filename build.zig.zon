@@ -1,6 +1,6 @@
 .{
     .name = .upaa,
-    .version = "0.3.1",
+    .version = "0.4.0",
     .fingerprint = 0x6f07ecca554367b4,
     .minimum_zig_version = "0.17.0",
     .paths = .{

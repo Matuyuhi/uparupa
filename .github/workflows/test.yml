@@ -81,13 +81,19 @@ jobs:
 
       # Open the real window and photograph it, without and with a config file. The file has two lines upaa cannot read,
       # for the footer and Settings to show.
-      # Only a launch failure, a crash or a missing window fails here; the pictures are kept to look at, not compared.
+      # Only a launch failure, a crash or a missing window fails here; screenshots-comment compares the pictures with main's.
       - name: Launch screenshots
         env:
           UPAA_NO_UPDATE_CHECK: "1"
         run: |
+          # The shell prompt shows the host name, which differs on every runner; one name keeps it out of the comparison.
+          sudo scutil --set HostName upaa-ci
           dir=build/screenshots
-          mkdir -p "$dir/default/upaa" "$dir/config/upaa"
+          mkdir -p "$dir/default/upaa" "$dir/config/upaa" "$dir/zsh"
+          # zsh's own startup files for the shots that start zsh: none, so zsh does not ask to make them. upaa starts the
+          # account's login shell, bash on the runner, so those shots switch the account to zsh while they run.
+          : > "$dir/zsh/.zshrc"
+          login="$(dscl . -read "/Users/$USER" UserShell | awk '{print $2}')"
           printf '%s\n' 'font-family = Menlo' 'font-family = Apple Color Emoji' 'font-size = 16' 'foreground = #cdd6f4' 'background = #1e1e2e' 'window-width = 100' \
             'cursor-style = bar' 'window-height = 2' > "$dir/config/upaa/config"
           # Prints the id of the window owned by the given process, to photograph that window alone.
@@ -123,10 +129,10 @@ jobs:
           printf '\033]8;;https://github.com/Matuyuhi/upaa/pull/64\033\\%s\033]8;;\033\\\n' 'a hyperlinked label'
           echo 'Again: https://github.com/Matuyuhi/upaa/pull/70'
           SH
-          for name in default config top tabs reopen find ja changes links dark; do
+          for name in default config top tabs reopen find ja changes links dark close close-ja; do
             # top: no config file, with the tab list hidden (Cmd-B), so the tabs are in the toolbar, and a second tab opened there (Cmd-T),
             # while the first one prints a line, for its dot of new output.
-            # tabs: no config file, with a second tab (Cmd-T) running top, while the first one prints a line, for its dot of new output.
+            # tabs: no config file, with a second tab (Cmd-T) showing /etc/shells in less, whose screen is the same on every run, while the first one prints a line, for its dot of new output.
             # reopen: no config file, with a second tab (Cmd-T) moved to /usr, closed (Cmd-W) and opened again (Cmd-Shift-T).
             # find: no config file, with a line echoed and the find bar (Cmd-F) looking for a word in it.
             # changes: no config file, in the repository above, with the right panel shown (Cmd-J).
@@ -134,20 +140,27 @@ jobs:
             # ja: with the config file, in Japanese, and its Settings window (Cmd-,) as well, so the problems show in Japanese.
             # The others are in English.
             # dark: no config file, with the runner switched to dark mode.
+            # close, close-ja: no config file, in zsh with upaa's startup files, with a job left in the background and
+            # Cmd-W pressed, so the sheet asking whether to close the window shows over it, in English and in Japanese.
             conf="$name"
             lang=en
-            case "$name" in top | tabs | reopen | find | changes | links) conf=default ;; esac
+            shell="$login"
+            case "$name" in close*) shell=/bin/zsh ;; esac
+            case "$name" in top | tabs | reopen | find | changes | links | close) conf=default ;; esac
             if [ "$name" = ja ]; then conf=config; lang=ja; fi
+            if [ "$name" = close-ja ]; then conf=default; lang=ja; fi
             if [ "$name" = dark ]; then
               conf=default
               osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
             fi
             # Each launch starts at the config's size, not where the last one left its window.
             defaults delete local.upaa 2>/dev/null || true
-            XDG_CONFIG_HOME="$PWD/$dir/$conf" build/upaa.app/Contents/MacOS/upaa -AppleLanguages "($lang)" &
+            sudo dscl . -create "/Users/$USER" UserShell "$shell"
+            SHELL="$shell" ZDOTDIR="$PWD/$dir/zsh" XDG_CONFIG_HOME="$PWD/$dir/$conf" build/upaa.app/Contents/MacOS/upaa -AppleLanguages "($lang)" &
             pid=$!
             swift "$dir/window.swift" "$pid" wait > /dev/null
             sleep 1
+            sudo dscl . -create "/Users/$USER" UserShell "$login"
             kill -0 "$pid" || { echo "upaa exited during launch ($name)"; exit 1; }
             if [ "$name" = top ]; then
               osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
@@ -165,8 +178,8 @@ jobs:
                 -e 'delay 0.5' \
                 -e 'tell application "System Events" to keystroke "t" using command down' \
                 -e 'delay 1' \
-                -e 'tell application "System Events" to keystroke "top"' \
-                -e 'tell application "System Events" to key code 36' || echo "could not press Cmd-T, run top"
+                -e 'tell application "System Events" to keystroke "less /etc/shells"' \
+                -e 'tell application "System Events" to key code 36' || echo "could not press Cmd-T, run less"
               # The tab list reads the programs every 3 seconds.
               sleep 5
             fi
@@ -209,6 +222,14 @@ jobs:
               # The panel reads the panes every 3 seconds.
               sleep 5
             fi
+            case "$name" in close*)
+              osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
+                -e 'tell application "System Events" to keystroke "sleep 600 &"' \
+                -e 'tell application "System Events" to key code 36' \
+                -e 'delay 1' \
+                -e 'tell application "System Events" to keystroke "w" using command down' || echo "could not press Cmd-W"
+              sleep 2 ;;
+            esac
             id="$(swift "$dir/window.swift" "$pid")"
             [ -n "$id" ] || { echo "upaa opened no window ($name)"; exit 1; }
             screencapture -x -o -l "$id" "$dir/$name.png"
@@ -223,6 +244,48 @@ jobs:
             kill "$pid"
             wait "$pid" || true
           done
+
+      # Cmd-W on the last pane closes the window without asking when it would end nothing: in zsh with only a job it
+      # disowned, as themes start their daemons (powerlevel10k's gitstatusd), and in an idle bash. Fails if the window
+      # stays, and keeps a picture of it, or if zsh did not start the job.
+      - name: Close without asking
+        env:
+          UPAA_NO_UPDATE_CHECK: "1"
+        run: |
+          dir=build/screenshots
+          login="$(dscl . -read "/Users/$USER" UserShell | awk '{print $2}')"
+          failed=
+          for shell in zsh bash; do
+            typed=
+            [ "$shell" = bash ] || typed='sleep 600 &!'
+            pkill -x sleep || true
+            defaults delete local.upaa 2>/dev/null || true
+            sudo dscl . -create "/Users/$USER" UserShell "/bin/$shell"
+            SHELL="/bin/$shell" ZDOTDIR="$PWD/$dir/zsh" XDG_CONFIG_HOME="$PWD/$dir/default" build/upaa.app/Contents/MacOS/upaa -AppleLanguages '(en)' &
+            pid=$!
+            swift "$dir/window.swift" "$pid" wait > /dev/null
+            sleep 1
+            sudo dscl . -create "/Users/$USER" UserShell "$login"
+            osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
+              -e "tell application \"System Events\" to keystroke \"$typed\"" \
+              -e 'tell application "System Events" to key code 36' \
+              -e 'delay 1' \
+              -e 'tell application "System Events" to keystroke "w" using command down' || echo "could not press Cmd-W"
+            sleep 2
+            id="$(swift "$dir/window.swift" "$pid")"
+            if [ -n "$id" ]; then
+              echo "the window stayed open after Cmd-W ($shell)"
+              screencapture -x -o -l "$id" "$dir/close-$shell.png"
+              failed=1
+            else
+              echo "the window closed without asking ($shell)"
+            fi
+            # The disowned job outlives the window.
+            if [ -n "$typed" ] && ! pkill -x sleep; then echo "zsh did not start the job"; failed=1; fi
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" || true
+          done
+          [ -z "$failed" ]
 
       # The Settings window (Cmd-,), alone, with the config file above. Pressing keys needs the runner to allow it,
       # so a missing picture does not fail here.
@@ -314,9 +377,10 @@ jobs:
           name: snapshots
           path: build/snapshots
 
-  # Show the launch screenshots on the pull request, in one comment edited on each push.
+  # Show the launch screenshots on the pull request next to main's, in one comment edited on each push.
   # gh pr comment --attach refuses the workflow token, so the pictures go on the ci-screenshots branch,
   # which holds one commit with the latest pictures of each pull request, and the comment links to them.
+  # A changed picture does not fail anything: a change to how upaa looks is often the point of the pull request.
   # A separate job, so the job that builds and runs the pull request's code keeps a read-only token.
   # A pull request from a fork never gets write access, so it is skipped there.
   screenshots-comment:
@@ -333,37 +397,116 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       SHA: ${{ github.event.pull_request.head.sha }}
+      BASE: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Post the launch screenshots
         run: |
+          # A run of an older push that ends after a newer one leaves the pictures and the comment alone. Checked again
+          # just before the push and the comment, as a newer run may have finished meanwhile.
+          current() { [ "$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha)" = "$SHA" ] || { echo "#$PR is no longer at $SHA"; exit 0; }; }
+          current
           gh run download "$GITHUB_RUN_ID" --name launch-screenshots --dir shots
+          # main's pictures: those of the commit this pull request was tested on, or else the latest ones of main.
+          runs="$(gh api "repos/$GH_REPO/actions/artifacts?name=launch-screenshots&per_page=100" --paginate \
+            --jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)
+              | select(.workflow_run.head_sha == \"$BASE\" or .workflow_run.head_branch == \"main\")
+              | \"\(.workflow_run.head_sha) \(.workflow_run.id)\"")"
+          main="$(printf '%s\n' "$runs" | awk -v base="$BASE" '$1 == base { print; exit }')"
+          [ -n "$main" ] || main="$(printf '%s\n' "$runs" | awk 'NR == 1')"
+          [ -z "$main" ] || gh run download "${main#* }" --name launch-screenshots --dir main || main=
+          command -v compare > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick > /dev/null; }
+          out="pr-$PR/$SHA"
+          mkdir -p "$out"
+          cp shots/*.png "$out/"
+          url="https://raw.githubusercontent.com/$GH_REPO/ci-screenshots/$out"
+          # A pixel counts as changed when its color moves by more than 20%, which leaves out anti-aliasing,
+          # and a screen when over 0.05% of its pixels changed, which leaves out the mascot's gills swaying between poses.
+          changed= unchanged= all=
+          while IFS='|' read -r name label; do
+            if [ ! -f "shots/$name.png" ]; then
+              [ ! -f "main/$name.png" ] || changed="$changed### $label: not taken, though main has it"$'\n\n'
+              continue
+            fi
+            all="$all$label: ![$name]($url/$name.png)"$'\n\n'
+            [ -n "$main" ] || continue
+            if [ ! -f "main/$name.png" ]; then
+              changed="$changed### $label: new"$'\n\n'"![$name]($url/$name.png)"$'\n\n'
+              continue
+            fi
+            cp "main/$name.png" "$out/main-$name.png"
+            before="$(identify -format '%wx%h' "main/$name.png")" || before=unreadable
+            after="$(identify -format '%wx%h' "shots/$name.png")" || after=unreadable
+            if [ "$before" != "$after" ]; then
+              changed="$changed### $label: $before → $after"$'\n\n'"| main | this pull request |"$'\n'"| --- | --- |"$'\n'
+              changed="$changed| ![main]($url/main-$name.png) | ![$name]($url/$name.png) |"$'\n\n'
+              continue
+            fi
+            # compare exits with 1 when the pictures differ, and with 2 when it could not compare them.
+            status=0
+            pixels="$(compare -fuzz 20% -metric AE "main/$name.png" "shots/$name.png" "$out/diff-$name.png" 2>&1)" || status=$?
+            if [ "$status" -gt 1 ]; then
+              changed="$changed### $label: could not compare ($pixels)"$'\n\n'"![$name]($url/$name.png)"$'\n\n'
+              continue
+            fi
+            share="$(awk -v p="$pixels" -v size="$after" 'BEGIN { split(size, s, "x"); printf "%.2f", 100 * p / (s[1] * s[2]) }')"
+            if awk -v share="$share" 'BEGIN { exit !(share > 0.05) }'; then
+              changed="$changed### $label: $share% changed"$'\n\n'"| main | this pull request | difference |"$'\n'"| --- | --- | --- |"$'\n'
+              changed="$changed| ![main]($url/main-$name.png) | ![$name]($url/$name.png) | ![difference]($url/diff-$name.png) |"$'\n\n'
+            else
+              rm "$out/diff-$name.png"
+              unchanged="$unchanged${unchanged:+, }$label"
+            fi
+          done <<'SHOTS'
+          default|Without a config file
+          config|With a config file
+          top|Tabs along the top (Cmd-B), the first with new output
+          tabs|A second tab running less, the first with new output
+          reopen|A closed tab opened again in /usr (Cmd-Shift-T)
+          find|Find (Cmd-F)
+          ja|In Japanese, with the config file
+          changes|Changes panel with lines wider than it (Cmd-J)
+          links|Links panel with addresses printed, wrapped and hyperlinked (Shift-Cmd-J)
+          dark|In dark mode
+          close|Cmd-W in zsh with a job in the background
+          close-ja|The same in Japanese
+          close-zsh|Cmd-W in zsh with nothing running left the window open
+          close-bash|Cmd-W in bash with nothing running left the window open
+          settings|Settings (Cmd-,)
+          settings-ja|Settings in Japanese
+          settings-reload|Settings after the file is fixed and font-size = 20 is added
+          SHOTS
+          {
+            if [ -z "$main" ]; then
+              printf '%s\n\n%s' "Launch screenshots for $SHA. main has no pictures to compare them with." "$all"
+            else
+              note=
+              [ "${main%% *}" = "$BASE" ] || note=" (the pictures of the base $BASE are not ready, so these are main's latest)"
+              printf '%s\n\n' "Launch screenshots for $SHA, compared with main at ${main%% *}$note."
+              printf '%s' "$changed"
+              [ -n "$changed" ] || printf '%s\n\n' 'No screen changed.'
+              [ -z "$unchanged" ] || printf '%s\n\n' "Unchanged: $unchanged."
+              printf '<details><summary>%s</summary>\n\n%s</details>\n' 'All screenshots of this pull request' "$all"
+            fi
+          } > comment.md
           git init -q store
           cd store
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GH_REPO.git"
-          if git fetch -q --depth 1 origin ci-screenshots; then git checkout -q FETCH_HEAD; fi
-          # A new commit with no parent each time, so old pictures do not pile up in the history.
-          git checkout -q --orphan next
-          rm -rf "pr-$PR"
-          mkdir -p "pr-$PR/$SHA"
-          cp ../shots/*.png "pr-$PR/$SHA/"
-          git add -A
-          git commit -q -m "Launch screenshots of #$PR at $SHA"
-          git push -q --force origin HEAD:ci-screenshots
-          url="https://raw.githubusercontent.com/$GH_REPO/ci-screenshots/pr-$PR/$SHA"
-          printf '%s\n' "Launch screenshots for $SHA" '' \
-            "Without a config file: ![default]($url/default.png)" '' \
-            "With a config file: ![config]($url/config.png)" '' \
-            "Tabs along the top (Cmd-B), the first with new output: ![top]($url/top.png)" '' \
-            "A second tab running top, the first with new output: ![tabs]($url/tabs.png)" '' \
-            "A closed tab opened again in /usr (Cmd-Shift-T): ![reopen]($url/reopen.png)" '' \
-            "Find (Cmd-F): ![find]($url/find.png)" '' \
-            "In Japanese, with the config file: ![ja]($url/ja.png)" '' \
-            "Changes panel with lines wider than it (Cmd-J): ![changes]($url/changes.png)" '' \
-            "Links panel with addresses printed, wrapped and hyperlinked (Shift-Cmd-J): ![links]($url/links.png)" '' \
-            "In dark mode: ![dark]($url/dark.png)" > ../comment.md
-          if [ -f ../shots/settings.png ]; then printf '\n%s\n' "Settings (Cmd-,): ![settings]($url/settings.png)" >> ../comment.md; fi
-          if [ -f ../shots/settings-ja.png ]; then printf '\n%s\n' "Settings in Japanese: ![settings-ja]($url/settings-ja.png)" >> ../comment.md; fi
-          if [ -f ../shots/settings-reload.png ]; then printf '\n%s\n' "Settings after the file is fixed and font-size = 20 is added: ![settings-reload]($url/settings-reload.png)" >> ../comment.md; fi
+          # Pull requests push here at the same time, so the push is made again on the latest commit if another one won.
+          for attempt in 1 2 3; do
+            last=
+            if git fetch -q --depth 1 origin ci-screenshots; then git checkout -q -f FETCH_HEAD; last="$(git rev-parse HEAD)"; fi
+            # A new commit with no parent each time, so old pictures do not pile up in the history.
+            git checkout -q --orphan "next-$attempt"
+            rm -rf "pr-$PR"
+            mkdir -p "pr-$PR"
+            cp -R "../$out" "pr-$PR/"
+            git add -A
+            git commit -q -m "Launch screenshots of #$PR at $SHA"
+            current
+            git push -q --force-with-lease="ci-screenshots:$last" origin HEAD:ci-screenshots && break
+            [ "$attempt" != 3 ] || exit 1
+          done
+          current
           gh pr comment "$PR" --edit-last --create-if-none --body-file ../comment.md
