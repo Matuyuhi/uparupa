@@ -1,0 +1,60 @@
+name: upstream-check
+
+# Once a week, open an issue when libghostty-vt or Zig has a release newer than the one upaa is pinned to.
+# Dependabot cannot update these: a new libghostty-vt needs its signature checked and a new SHA-256 and license list,
+# and a new Zig minor version usually needs code changes. An issue with the same title, open or closed, is not opened
+# again, so closing one dismisses that version.
+# No action is used, so the job needs no checkout, and its entry in actions.lock lists nothing.
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Look for newer releases
+        run: |
+          # Prints the file at the default branch.
+          file() { gh api -H 'Accept: application/vnd.github.raw' "repos/$GH_REPO/contents/$1"; }
+          # Opens an issue with the title, unless there is one with the same title, open or closed.
+          report() {
+            if gh issue list --state all --search "in:title \"$1\"" --json title --jq '.[].title' | grep -qxF "$1"; then
+              echo "Already reported: $1"
+            else
+              gh issue create --title "$1" --body "$2" --label investigation
+            fi
+          }
+
+          pinned="$(file scripts/fetch-ghostty-vt.sh | sed -n 's/^VERSION=//p')"
+          latest="$(git ls-remote --tags --refs https://github.com/ghostty-org/ghostty 'refs/tags/vt-*' \
+            | sed 's|.*refs/tags/vt-||' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          echo "libghostty-vt: pinned $pinned, latest $latest"
+          [ -n "$pinned" ] && [ -n "$latest" ] || { echo "Cannot read the libghostty-vt versions"; exit 1; }
+          if [ "$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n 1)" != "$pinned" ]; then
+            report "libghostty-vt $latest が出た" "upaa uses libghostty-vt $pinned (scripts/fetch-ghostty-vt.sh). $latest is tagged as vt-$latest in ghostty-org/ghostty.
+
+          To move to it: check the headers at vt-$latest for changed functions, update VERSION and ZIP_SHA256 in scripts/fetch-ghostty-vt.sh after verifying the signature, update THIRD_PARTY_LICENSES.md, and update the vt-$pinned references in CLAUDE.md and .github/review.md."
+          fi
+
+          pinned="$(file scripts/fetch-zig.sh | sed -n 's/^VERSION=//p')"
+          latest="$(curl -fsSL --proto =https https://ziglang.org/download/index.json \
+            | jq -r 'keys[]' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          echo "Zig: pinned $pinned, latest $latest"
+          [ -n "$pinned" ] && [ -n "$latest" ] || { echo "Cannot read the Zig versions"; exit 1; }
+          if [ "$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n 1)" != "$pinned" ]; then
+            report "Zig $latest が出た" "CI and releases build with Zig $pinned (VERSION in scripts/fetch-zig.sh). Zig $latest is out.
+
+          To move to it: update VERSION in scripts/fetch-zig.sh and run the tests. For a new minor version, also expect code changes, and update minimum_zig_version in build.zig.zon and the Zig version in CLAUDE.md."
+          fi

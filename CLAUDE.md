@@ -7,7 +7,7 @@ Progress, remaining work, and unconfirmed items are tracked in GitHub Issues (la
 ## Decided
 
 - Target is macOS 13 or later on Apple Silicon (arm64) only. No cross-platform support.
-- The language is a mix of Swift and Zig. UI, IME, and Metal calls are in Swift. The rest of the core (PTY, libghostty-vt calls, building drawing data, glyph cache) is in Zig. Zig is 0.17.x.
+- The language is a mix of Swift and Zig. UI, IME, and Metal calls are in Swift. The rest of the core (PTY, libghostty-vt calls, building drawing data, glyph cache) is in Zig. Zig is 0.17.x. CI and releases build with the exact version that `scripts/fetch-zig.sh` fetches.
 - Zig was chosen because the user wants to write in it. If the mix costs noticeable performance or effort, say so plainly; the fallback is a core in C.
 - Build uses SwiftPM and `scripts/build-app.sh` (`zig build` → `swift build` → `build/upaa.app`).
 - The prebuilt libghostty-vt XCFramework is fetched by `scripts/fetch-ghostty-vt.sh`. It is not included in the repository.
@@ -38,6 +38,13 @@ Do not proceed by just piling on code. Avoid increasing the amount of code itsel
 - When a problem occurs, do not stack workarounds. Identify the cause and fix it at the source. If a workaround must go in before the cause is identified, consult first.
 - Remove code that is no longer needed because the premise changed, in the same change.
 - Reports of changes state how many lines were added and how many were removed.
+
+## Pull requests and merging
+
+- The title is in Japanese, and the description is short, plain English.
+- Every push to a pull request that is not a draft gets a Claude review (`.github/workflows/review.yml`, guidelines in `.github/review.md`). It ends with a verdict and puts the label `ready-to-merge` or `needs-human` on the pull request.
+- Claude merges its own pull request without asking when all of these hold: on the latest commit the `review` workflow finished and `test` passed, the label `ready-to-merge` was put there by the review workflow (never by hand), and the user has asked for nothing on it that is still open. This is the one exception to asking before publishing (see "Rules to follow"). Then it checks that `test` passes on `main`.
+- Otherwise the user decides. Ask with the reasons from the verdict. Fix findings and push, so the review runs again, rather than asking about them.
 
 ## Version and release
 
