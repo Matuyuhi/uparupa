@@ -114,8 +114,12 @@ final class RemoteControl {
         var id: String?
         var down = false
         var words: [String] = []
+        let usage = {
+            connection.answer(2, Self.usage + String(localized: "A pane's ID is its shell's process ID, as upaa list shows. Without --pane, the command acts on the pane it runs in.") + "\n")
+        }
         while let word = rest.popFirst() {
-            if word == "--pane", let value = rest.popFirst() {
+            if word == "--pane" {
+                guard let value = rest.popFirst() else { return usage() }
                 id = value
             } else if word == "--down" {
                 down = true
@@ -125,7 +129,7 @@ final class RemoteControl {
         }
         let commands = ["list", "focus", "new-tab", "split", "read", "close", "send"]
         guard commands.contains(command), words.count == (command == "send" ? 1 : 0), !down || command == "split" else {
-            return connection.answer(2, Self.usage + String(localized: "A pane's ID is its shell's process ID, as upaa list shows. Without --pane, the command acts on the pane it runs in.") + "\n")
+            return usage()
         }
         let windows = self.windows()
         if command == "list" { return connection.answer(0, list(windows)) }
@@ -165,6 +169,9 @@ final class RemoteControl {
             let withdraw = window.allow(pane, question, detail: detail) { allowed in
                 connection.withdraw = nil
                 guard connection.isOpen else { return }
+                guard let allowed else {
+                    return connection.answer(1, "upaa: " + String(localized: "The window is already asking something. Answer it, then try again.") + "\n")
+                }
                 guard allowed else {
                     return connection.answer(1, "upaa: " + String(localized: "The tab did not allow this.") + "\n")
                 }
@@ -321,17 +328,20 @@ private final class Connection {
 
     /// Sends the exit code and the text, and closes the socket.
     func answer(_ code: UInt8, _ text: String) {
-        guard isOpen else { return }
-        _ = RemoteControl.writeAll(fd, [code] + Array(text.utf8))
-        end()
+        end(sending: [code] + Array(text.utf8))
     }
 
-    private func end() {
+    /// The bytes are written off the main thread, since a command that is stopped (Ctrl-Z) or does not read would
+    /// otherwise hold the app once the answer is more than the socket holds.
+    private func end(sending bytes: [UInt8] = []) {
         guard isOpen else { return }
         isOpen = false
         withdraw?()
         withdraw = nil
-        source.cancel()
         onEnd(self)
+        DispatchQueue.global().async { [fd, source] in
+            _ = RemoteControl.writeAll(fd, bytes)
+            source.cancel()
+        }
     }
 }

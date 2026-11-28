@@ -636,12 +636,14 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     }
 
     /// Whether the upaa command may read, type into or close the pane, as its tab is set: at once when the tab allows or
-    /// denies it, otherwise from a sheet that asks, Deny by default. Returns what takes the sheet down while it asks.
-    func allow(_ pane: TerminalView, _ question: String, detail: String, answer: @escaping (Bool) -> Void)
+    /// denies it, otherwise from a sheet that asks, Deny by default. nil when the window already shows a sheet, since a
+    /// sheet queued behind it could not be taken down when the command goes away. Returns what takes the sheet down.
+    func allow(_ pane: TerminalView, _ question: String, detail: String, answer: @escaping (Bool?) -> Void)
         -> (() -> Void)?
     {
         switch tab(of: pane)?.access {
         case .allow: answer(true)
+        case .ask where window.attachedSheet != nil: answer(nil)
         case .ask:
             let alert = NSAlert()
             alert.messageText = question

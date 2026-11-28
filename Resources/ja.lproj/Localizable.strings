@@ -106,6 +106,7 @@
 "Name the pane with --pane: this process is not in an upaa pane." = "--pane でペインを指定してください。このプロセスは upaa のペインの中にありません。";
 "Could not start a shell." = "シェルを起動できませんでした。";
 "The tab did not allow this." = "タブがこの操作を許可しませんでした。";
+"The window is already asking something. Answer it, then try again." = "ウィンドウがほかのことを確認中です。それに答えてから、もう一度試してください。";
 "Run this in an upaa pane." = "upaa のペインの中で実行してください。";
 "Remote control is off. Add “remote-control = true” to %@." = "リモート操作が無効です。%@ に「remote-control = true」を書いてください。";
 "upaa did not answer." = "upaa から返事がありませんでした。";
