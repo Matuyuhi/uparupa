@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run still going for its earlier commit. Other runs are never cancelled.
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   # Check that the actions still use the commits pinned in actions.lock.
   # When adding or upgrading an action, run gh actions-lock locally and commit the lockfile.
@@ -54,7 +59,8 @@ jobs:
             ~/.cache/zig
             .zig-cache
             .build
-          key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**') }}
+          # fetch-zig.sh pins the Zig version, so a new Zig saves a cache of its own.
+          key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**', 'scripts/fetch-zig.sh') }}
           restore-keys: build-${{ runner.os }}-
 
       - name: Install Metal Toolchain
