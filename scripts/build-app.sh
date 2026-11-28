@@ -18,8 +18,11 @@ zig build -Doptimize="$ZIG_OPT"
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 set -- -c "$CONFIG" --arch arm64 \
   -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "$SDK"
-swift build "$@"
 BIN_DIR="$(swift build "$@" --show-bin-path)"
+# libupaacore.a reaches the linker only through flags, so SwiftPM does not see it change. Remove the executable so a new
+# Zig core is always linked in.
+rm -f "$BIN_DIR/upaa"
+swift build "$@"
 
 APP=build/upaa.app
 rm -rf "$APP"
