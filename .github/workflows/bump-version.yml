@@ -58,8 +58,8 @@ jobs:
           esac
           # Look at the milestones before main moves, so that a rename that cannot be done stops the bump.
           api="repos/$GITHUB_REPOSITORY/milestones"
-          number="$(gh api "$api?state=open&per_page=100" --jq ".[] | select(.title == \"$current\") | .number")"
-          next_number="$(gh api "$api?state=all&per_page=100" --jq ".[] | select(.title == \"$next\") | .number")"
+          number="$(gh api --paginate "$api?state=open&per_page=100" --jq ".[] | select(.title == \"$current\") | .number")"
+          next_number="$(gh api --paginate "$api?state=all&per_page=100" --jq ".[] | select(.title == \"$next\") | .number")"
           released=""
           gh release view "v$current" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 && released=yes
           if [ -n "$number" ] && [ -n "$next_number" ] && [ -z "$released" ]; then
@@ -92,5 +92,9 @@ jobs:
             gh api -X PATCH "$api/$number" -f title="$next" --silent
           else
             [ -z "$number" ] || gh api -X PATCH "$api/$number" -f state=closed --silent
-            [ -n "$next_number" ] || gh api "$api" -f title="$next" --silent
+            if [ -n "$next_number" ]; then
+              gh api -X PATCH "$api/$next_number" -f state=open --silent
+            else
+              gh api "$api" -f title="$next" --silent
+            fi
           fi
