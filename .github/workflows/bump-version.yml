@@ -88,6 +88,7 @@ jobs:
           done
           git push origin HEAD:main
           echo "$current -> $next"
+          trap 'echo "main is at $next, but the milestones were not updated. Fix them by hand so that the one open milestone is named $next"' ERR
           if [ -n "$number" ] && [ -z "$released" ]; then
             gh api -X PATCH "$api/$number" -f title="$next" --silent
           else
