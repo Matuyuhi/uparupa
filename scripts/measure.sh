@@ -61,10 +61,17 @@ SWIFT
 swiftc -O "$out/window.swift" -o "$out/window"
 
 pid=
-# A failure on the way leaves no app running.
-trap '[ -z "$pid" ] || kill "$pid" 2> /dev/null || true' EXIT
+# Each launch starts at the default size, so upaa's saved windows are deleted, and put back at the end, for a Mac in use.
+saved=
+if defaults export local.upaa "$out/defaults.plist" 2> /dev/null; then saved=1; fi
+# Also on a failure on the way, which leaves no app running.
+finish() {
+  [ -z "$pid" ] || kill "$pid" 2> /dev/null || true
+  if [ -n "$saved" ]; then defaults import local.upaa "$out/defaults.plist"; else defaults delete local.upaa 2> /dev/null || true; fi
+}
+trap finish EXIT
 launch() {
-  # Each launch starts at the default size, with no config file, and without the daily update check.
+  # Each launch starts with no config file, and without the daily update check.
   defaults delete local.upaa 2>/dev/null || true
   XDG_CONFIG_HOME="$out/config" UPAA_NO_UPDATE_CHECK=1 "$bin" -AppleLanguages '(en)' > /dev/null &
   pid=$!
@@ -113,7 +120,7 @@ timed() {
     -e 'tell application "System Events" to key code 36'
   deadline=$(( $(date +%s) + 180 ))
   until grep -q '^real' "$file" 2>/dev/null; do
-    [ "$(date +%s)" -lt "$deadline" ] || { echo "$2 did not finish in 180 seconds"; exit 1; }
+    [ "$(date +%s)" -lt "$deadline" ] || { echo "$2 did not finish in 180 seconds" >&2; exit 1; }
     sleep 0.1
   done
   record "$1_s" "$(awk '/^real/ { print $2 }' "$file")"
@@ -177,7 +184,6 @@ record five_panes_idle_cpu_percent "$(cpu_over 20)"
 record five_panes_footprint_mib "$(footprint)"
 quit
 pid=
-defaults delete local.upaa 2>/dev/null || true
 
 awk -F '\t' 'BEGIN { printf "{" } { printf "%s\"%s\": %s", (NR > 1 ? ", " : ""), $1, $2 } END { print "}" }' "$results" > "$out/results.json"
 cat "$out/results.json"
