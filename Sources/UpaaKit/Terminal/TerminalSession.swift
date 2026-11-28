@@ -7,6 +7,8 @@ final class TerminalSession {
     private let events: Events
     /// Gives setColors the colors it names.
     var config: Config?
+    /// The web addresses the session has printed, oldest first (readLinks).
+    private(set) var links: [Link] = []
 
     /// The screen changed. Called on the main thread.
     var onWakeup: (() -> Void)? {
@@ -178,6 +180,15 @@ final class TerminalSession {
         var out = [UInt8](repeating: 0, count: 64 * 1024)
         let n = upaa_session_plain_text(handle, &out, out.count)
         return n >= 0 ? String(decoding: out.prefix(min(n, out.count)), as: UTF8.self) : ""
+    }
+
+    /// Adds the web addresses printed since the previous call to links.
+    func readLinks() {
+        // The text since the previous call, as VT sequences so that hyperlinks come with it. Of more than fits, the
+        // newest part.
+        var out = [UInt8](repeating: 0, count: 1 << 20)
+        let n = upaa_session_new_text(handle, &out, out.count)
+        Links.add(Links.find(in: String(decoding: out.prefix(n), as: UTF8.self)), to: &links, now: Date())
     }
 
     /// true if the screen has changed since the previous call.

@@ -27,6 +27,7 @@ Be strict. Most pull requests here are written by Claude and merged by Claude wh
 - The pull request itself:
   - The title is Japanese, and the description is short, plain English.
   - Claims in the description that the diff does not back: something said to work that was not run, wrong line counts, or a missing `Closes #N` (or `Part of #N` when the issue stays open on purpose).
+  - A change users can see with no milestone on the pull request or its issue (see "Version and release" in `CLAUDE.md`).
   - `README.md` is in English and does not list languages the app supports. Pictures in it show the app, not the Settings window.
 
 Skip style, naming taste, and formatting.

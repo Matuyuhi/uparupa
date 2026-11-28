@@ -37,12 +37,41 @@ jobs:
             The changes are the commits after the latest tag (`git describe --tags --abbrev=0`) up to HEAD.
             Read their messages, and read the diff where a message does not say what changed for users.
             Write for people who use upaa: say what changed for them, in plain English, as a short Markdown list.
-            Group items under "### Added", "### Changed" and "### Fixed", leaving out a heading that has no items.
+            Group items under "### Breaking", "### Added", "### Changed" and "### Fixed", leaving out a heading that has no items.
+            "### Breaking" is for changes that make something stop working as before, such as the config format.
             Leave out commits that change nothing for users (version bumps, CI, tests, refactoring).
             Return the notes alone in `notes`, with no title and no preamble. Do not change any file.
 
+  # Release only when the milestone named after the version has nothing open (see "Version and release" in CLAUDE.md).
+  milestone:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check that the milestone is done
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)"
+          set -- $(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
+            --jq ".[] | select(.title == \"$version\") | \"\\(.number) \\(.open_issues)\"")
+          number="${1:-}"; open="${2:-}"
+          [ -n "$number" ] || { echo "No milestone is named $version"; exit 1; }
+          [ "$open" = 0 ] || { echo "Milestone $version still has $open open issues or pull requests"; exit 1; }
+          # A patch release holds only fixes: every item it ships (a merged pull request or a completed issue) has the label bug.
+          if [ "${version##*.}" != 0 ]; then
+            others="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?milestone=$number&state=all&per_page=100" \
+              --jq '.[] | select(if .pull_request then .pull_request.merged_at else .state_reason == "completed" end)
+                | select(all(.labels[]; .name != "bug")) | "#\(.number)"' | tr '\n' ' ')"
+            [ -z "$others" ] || { echo "$version is a patch version, but $others are not labelled bug. Run bump-version.yml with part=minor"; exit 1; }
+          fi
+
   release:
-    needs: notes
+    needs: [notes, milestone]
     # Do not release from anything other than main.
     if: github.ref == 'refs/heads/main'
     runs-on: xcode-27
@@ -120,6 +149,7 @@ jobs:
       contents: write
       actions: write
       statuses: write
+      issues: write
     uses: ./.github/workflows/bump-version.yml
     with:
       part: patch

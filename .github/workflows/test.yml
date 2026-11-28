@@ -112,19 +112,31 @@ jobs:
           git -C "$repo" add . && git -C "$repo" -c user.name=ci -c user.email=ci@localhost commit -qm base
           printf '%s\n' 'func show() {' '    let panel = ChangesPanel(frame: NSRect(x: 0, y: 0, width: Chrome.sidePanelWidth, height: 400))' \
             '    // 長い行はパネルの幅で折り返し、横にスクロールしなくても最後まで読める。' '    panel.refresh(directory: root)' '}' > "$repo/Sample.swift"
-          for name in default config top tabs reopen find ja changes dark; do
+          # Addresses for the links shot: in sentences and Markdown, one too long for a line, a hyperlink (OSC 8) whose label
+          # is no address, and one printed twice.
+          cat > "$dir/links.sh" <<'SH'
+          clear
+          echo 'Opened https://github.com/Matuyuhi/upaa/pull/70 for review.'
+          echo 'It closes [#16](https://github.com/Matuyuhi/upaa/issues/16).'
+          echo 'Notes: https://www.notion.so/matuyuhi/upaa-design-notes-0123456789abcdef0123456789abcdef'
+          echo 'See https://developer.apple.com/documentation/appkit/nssplitviewitem/inspector-with-view-controller-swift.type.method'
+          printf '\033]8;;https://github.com/Matuyuhi/upaa/pull/64\033\\%s\033]8;;\033\\\n' 'a hyperlinked label'
+          echo 'Again: https://github.com/Matuyuhi/upaa/pull/70'
+          SH
+          for name in default config top tabs reopen find ja changes links dark; do
             # top: no config file, with the tab list hidden (Cmd-B), so the tabs are in the toolbar, and a second tab opened there (Cmd-T),
             # while the first one prints a line, for its dot of new output.
             # tabs: no config file, with a second tab (Cmd-T) running top, while the first one prints a line, for its dot of new output.
             # reopen: no config file, with a second tab (Cmd-T) moved to /usr, closed (Cmd-W) and opened again (Cmd-Shift-T).
             # find: no config file, with a line echoed and the find bar (Cmd-F) looking for a word in it.
             # changes: no config file, in the repository above, with the right panel shown (Cmd-J).
+            # links: no config file, with the script above run and the links panel shown (Shift-Cmd-J).
             # ja: with the config file, in Japanese, and its Settings window (Cmd-,) as well, so the problems show in Japanese.
             # The others are in English.
             # dark: no config file, with the runner switched to dark mode.
             conf="$name"
             lang=en
-            case "$name" in top | tabs | reopen | find | changes) conf=default ;; esac
+            case "$name" in top | tabs | reopen | find | changes | links) conf=default ;; esac
             if [ "$name" = ja ]; then conf=config; lang=ja; fi
             if [ "$name" = dark ]; then
               conf=default
@@ -187,6 +199,15 @@ jobs:
                 -e 'delay 1' \
                 -e 'tell application "System Events" to keystroke "j" using command down' || echo "could not type cd, Cmd-J"
               sleep 3
+            fi
+            if [ "$name" = links ]; then
+              osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
+                -e "tell application \"System Events\" to keystroke \"sh $PWD/$dir/links.sh\"" \
+                -e 'tell application "System Events" to key code 36' \
+                -e 'delay 1' \
+                -e 'tell application "System Events" to keystroke "j" using {command down, shift down}' || echo "could not type sh, Shift-Cmd-J"
+              # The panel reads the panes every 3 seconds.
+              sleep 5
             fi
             id="$(swift "$dir/window.swift" "$pid")"
             [ -n "$id" ] || { echo "upaa opened no window ($name)"; exit 1; }
@@ -340,6 +361,7 @@ jobs:
             "Find (Cmd-F): ![find]($url/find.png)" '' \
             "In Japanese, with the config file: ![ja]($url/ja.png)" '' \
             "Changes panel with lines wider than it (Cmd-J): ![changes]($url/changes.png)" '' \
+            "Links panel with addresses printed, wrapped and hyperlinked (Shift-Cmd-J): ![links]($url/links.png)" '' \
             "In dark mode: ![dark]($url/dark.png)" > ../comment.md
           if [ -f ../shots/settings.png ]; then printf '\n%s\n' "Settings (Cmd-,): ![settings]($url/settings.png)" >> ../comment.md; fi
           if [ -f ../shots/settings-ja.png ]; then printf '\n%s\n' "Settings in Japanese: ![settings-ja]($url/settings-ja.png)" >> ../comment.md; fi

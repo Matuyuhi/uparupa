@@ -7,6 +7,9 @@ name: bump-version
 # status checks"), so once both pass, their results are set on the commit as commit statuses of the same names, which
 # do, and main moves to it.
 # release.yml calls this after each release with part=patch, so main always holds the next version.
+# It also keeps one open milestone named after the version on main: it closes the milestone of the version just
+# released, or renames the open one when a minor or major bump comes before its release, then makes sure one named
+# after the new version exists.
 # Run it by hand (gh workflow run bump-version.yml -f part=minor) to move to a new minor or major version.
 on:
   workflow_dispatch:
@@ -33,6 +36,7 @@ jobs:
       contents: write
       actions: write
       statuses: write
+      issues: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -52,6 +56,15 @@ jobs:
             patch) next="$major.$minor.$((patch + 1))" ;;
             *) echo "part must be patch, minor or major: $PART"; exit 1 ;;
           esac
+          # Look at the milestones before main moves, so that a rename that cannot be done stops the bump.
+          api="repos/$GITHUB_REPOSITORY/milestones"
+          number="$(gh api --paginate "$api?state=open&per_page=100" --jq ".[] | select(.title == \"$current\") | .number")"
+          next_number="$(gh api --paginate "$api?state=all&per_page=100" --jq ".[] | select(.title == \"$next\") | .number")"
+          released=""
+          gh release view "v$current" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 && released=yes
+          if [ -n "$number" ] && [ -n "$next_number" ] && [ -z "$released" ]; then
+            echo "Milestone $next already exists. Move the items of milestone $current to it and close $current first"; exit 1
+          fi
           sed "s/\.version = \"$current\"/.version = \"$next\"/" build.zig.zon > build.zig.zon.new
           mv build.zig.zon.new build.zig.zon
           git diff --exit-code --quiet build.zig.zon && { echo "build.zig.zon did not change"; exit 1; }
@@ -75,3 +88,14 @@ jobs:
           done
           git push origin HEAD:main
           echo "$current -> $next"
+          trap 'echo "main is at $next, but the milestones were not updated. Fix them by hand so that the one open milestone is named $next"' ERR
+          if [ -n "$number" ] && [ -z "$released" ]; then
+            gh api -X PATCH "$api/$number" -f title="$next" --silent
+          else
+            [ -z "$number" ] || gh api -X PATCH "$api/$number" -f state=closed --silent
+            if [ -n "$next_number" ]; then
+              gh api -X PATCH "$api/$next_number" -f state=open --silent
+            else
+              gh api "$api" -f title="$next" --silent
+            fi
+          fi
