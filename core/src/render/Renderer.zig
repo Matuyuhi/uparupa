@@ -18,7 +18,7 @@ state: vt.GhosttyRenderState,
 frame: Frame,
 /// null when the mascot is not drawn (turned off in the config, and in snapshots).
 mascot: ?Mascot,
-/// Notice drawn above the mascot (e.g. an update is available).
+/// Notice drawn above the mascot, also when it is off (e.g. an update is available).
 note: [160]u8 = undefined,
 note_len: usize = 0,
 /// Grid size of the last frame, to tell whether a click hit the mascot.
@@ -66,11 +66,12 @@ pub fn buildFrame(self: *Renderer, session: *Session, preedit: []const u8, out: 
     _ = vt.ghostty_render_state_clean(self.state);
     self.cols = info.cols;
     self.rows = info.rows;
-    if (self.mascot) |mascot| if (info.cell_count == @as(u32, info.cols) * info.rows) {
-        const note = self.note[0..self.note_len];
-        info.mascot_next_ms = mascot.draw(out[0..info.cell_count], info.cols, info.rows, info.background, note, self.face, &self.atlas, nowMs());
+    if (info.cell_count == @as(u32, info.cols) * info.rows) {
+        const cells = out[0..info.cell_count];
+        if (self.mascot) |mascot| info.mascot_next_ms = mascot.draw(cells, info.cols, info.rows, info.background, self.face, &self.atlas, nowMs());
+        Mascot.drawNote(cells, info.cols, info.rows, info.background, self.note[0..self.note_len], self.face, &self.atlas);
         info.atlas_generation = self.atlas.generation;
-    };
+    }
     return info;
 }
 

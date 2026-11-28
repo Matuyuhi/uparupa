@@ -78,9 +78,9 @@ pub fn covers(cols: u16, rows: u16, col: i32, row: i32) bool {
     return col >= top.col and col < top.col + width and row >= top.row and row < rows;
 }
 
-/// Draws the picture for now_ms into the blank cells of a whole screen (cols x rows cells, row by row), and the note
-/// on the row above it. Returns the milliseconds until the picture changes, or 0 if it rests or none of it is visible.
-pub fn draw(m: Mascot, cells: []Cell, cols: u16, rows: u16, background: [4]u8, note: []const u8, face: Face, atlas: *Atlas, now_ms: u64) u32 {
+/// Draws the picture for now_ms into the blank cells of a whole screen (cols x rows cells, row by row).
+/// Returns the milliseconds until the picture changes, or 0 if it rests or none of it is visible.
+pub fn draw(m: Mascot, cells: []Cell, cols: u16, rows: u16, background: [4]u8, face: Face, atlas: *Atlas, now_ms: u64) u32 {
     const current = m.shown(now_ms);
     const top = origin(cols, rows);
     var visible = false;
@@ -96,20 +96,23 @@ pub fn draw(m: Mascot, cells: []Cell, cols: u16, rows: u16, background: [4]u8, n
             visible = true;
         }
     }
-
-    // The note ends where the picture ends. It is ASCII (UpdateCheck.swift), so one byte is one cell.
-    const note_row = top.row - 1;
-    if (note_row >= 0) {
-        const start = top.col + width - @as(i32, @intCast(note.len));
-        for (note, 0..) |ch, i| {
-            const col = start + @as(i32, @intCast(i));
-            if (col < 0 or col >= cols) continue;
-            const cell = blank(cells, cols, @intCast(col), @intCast(note_row), background) orelse continue;
-            cell.glyph = atlas.get(face, &.{ch});
-            cell.fg = note_color;
-        }
-    }
     return if (visible) current.next_ms else 0;
+}
+
+/// Draws the note into the blank cells of the row above the picture, also when the mascot is off, since the note is
+/// how an update is told. It ends where the picture ends. It is ASCII (UpdateCheck.swift), so one byte is one cell.
+pub fn drawNote(cells: []Cell, cols: u16, rows: u16, background: [4]u8, note: []const u8, face: Face, atlas: *Atlas) void {
+    const top = origin(cols, rows);
+    const note_row = top.row - 1;
+    if (note_row < 0) return;
+    const start = top.col + width - @as(i32, @intCast(note.len));
+    for (note, 0..) |ch, i| {
+        const col = start + @as(i32, @intCast(i));
+        if (col < 0 or col >= cols) continue;
+        const cell = blank(cells, cols, @intCast(col), @intCast(note_row), background) orelse continue;
+        cell.glyph = atlas.get(face, &.{ch});
+        cell.fg = note_color;
+    }
 }
 
 fn origin(cols: u16, rows: u16) struct { col: i32, row: i32 } {
@@ -272,7 +275,8 @@ test "drawn only into blank cells, at the bottom right, with the note above" {
     cells[text_index].glyph = atlas.get(face, "A");
     const text_cell = cells[text_index];
 
-    try std.testing.expectEqual(@as(u32, 600), m.draw(&cells, cols, rows, bg, "v9.9.9", face, &atlas, 0));
+    try std.testing.expectEqual(@as(u32, 600), m.draw(&cells, cols, rows, bg, face, &atlas, 0));
+    drawNote(&cells, cols, rows, bg, "v9.9.9", face, &atlas);
     try std.testing.expectEqual(text_cell, cells[text_index]);
     const beside = cells[text_index + 1];
     if (picture[y][x + 1].bits != 0) {
