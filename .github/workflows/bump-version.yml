@@ -56,6 +56,15 @@ jobs:
             patch) next="$major.$minor.$((patch + 1))" ;;
             *) echo "part must be patch, minor or major: $PART"; exit 1 ;;
           esac
+          # Look at the milestones before main moves, so that a rename that cannot be done stops the bump.
+          api="repos/$GITHUB_REPOSITORY/milestones"
+          number="$(gh api "$api?state=open&per_page=100" --jq ".[] | select(.title == \"$current\") | .number")"
+          next_number="$(gh api "$api?state=all&per_page=100" --jq ".[] | select(.title == \"$next\") | .number")"
+          released=""
+          gh release view "v$current" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 && released=yes
+          if [ -n "$number" ] && [ -n "$next_number" ] && [ -z "$released" ]; then
+            echo "Milestone $next already exists. Move the items of milestone $current to it and close $current first"; exit 1
+          fi
           sed "s/\.version = \"$current\"/.version = \"$next\"/" build.zig.zon > build.zig.zon.new
           mv build.zig.zon.new build.zig.zon
           git diff --exit-code --quiet build.zig.zon && { echo "build.zig.zon did not change"; exit 1; }
@@ -79,14 +88,9 @@ jobs:
           done
           git push origin HEAD:main
           echo "$current -> $next"
-          api="repos/$GITHUB_REPOSITORY/milestones"
-          number="$(gh api "$api?state=open&per_page=100" --jq ".[] | select(.title == \"$current\") | .number")"
-          if [ -n "$number" ]; then
-            if gh release view "v$current" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-              gh api -X PATCH "$api/$number" -f state=closed --silent
-            else
-              gh api -X PATCH "$api/$number" -f title="$next" --silent
-            fi
+          if [ -n "$number" ] && [ -z "$released" ]; then
+            gh api -X PATCH "$api/$number" -f title="$next" --silent
+          else
+            [ -z "$number" ] || gh api -X PATCH "$api/$number" -f state=closed --silent
+            [ -n "$next_number" ] || gh api "$api" -f title="$next" --silent
           fi
-          [ -n "$(gh api "$api?state=all&per_page=100" --jq ".[] | select(.title == \"$next\") | .number")" ] ||
-            gh api "$api" -f title="$next" --silent
