@@ -74,8 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Cmd-,.
     @objc func showSettings(_ sender: Any?) {
         let settings = settings ?? SettingsWindow(
-            families: config.fontFamilies, size: config.fontSize, problems: problems
-        ) { [weak self] in self?.saveFont(families: $0, size: $1) }
+            families: config.fontFamilies, size: config.fontSize, mascot: config.mascot, problems: problems,
+            onFont: { [weak self] in self?.save { try Config.saveFont(families: $0, size: $1) } },
+            onMascot: { [weak self] on in self?.save { try Config.saveMascot(on) } })
         self.settings = settings
         settings.showWindow(nil)
     }
@@ -92,10 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyFont()
     }
 
-    /// Saves the font to the config file. The file's change puts it in the windows.
-    private func saveFont(families: [String], size: Double) {
+    /// Saves a change from Settings to the config file. The file's change puts it in the windows.
+    private func save(_ change: () throws -> Void) {
         do {
-            try Config.saveFont(families: families, size: size)
+            try change()
         } catch {
             if let window = settings?.window { NSAlert(error: error).beginSheetModal(for: window) }
             return
@@ -132,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fontFamily = config.fontFamily
         for terminal in terminals.allObjects {
             terminal.session.config = config
+            terminal.setMascot(config.mascot)
             terminal.session.setColors(dark: terminal.effectiveAppearance.isDark)
         }
         for window in NSApp.windows where window.delegate is TabbedWindow {
@@ -146,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fontMissing = false
         applyFont()
         for window in windows { window.problems = problems }
-        settings?.show(families: config.fontFamilies, size: config.fontSize, problems: problems)
+        settings?.show(families: config.fontFamilies, size: config.fontSize, mascot: config.mascot, problems: problems)
     }
 
     /// Puts the font in every open terminal, and steps every window's size by the new cell.
@@ -199,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let scale = scale
         func makeRenderer(device: MTLDevice) -> Renderer? {
             // The window's card behind the terminal has its default background, so the terminal draws none.
-            try? Renderer(device: device, fontName: fontFamily, fontSize: fontSize, scale: scale, mascot: true,
+            try? Renderer(device: device, fontName: fontFamily, fontSize: fontSize, scale: scale, mascot: config.mascot,
                          backgroundOpacity: 0)
         }
         guard let device = MTLCreateSystemDefaultDevice(),

@@ -16,7 +16,7 @@ face: Face,
 atlas: Atlas,
 state: vt.GhosttyRenderState,
 frame: Frame,
-/// null when the mascot is not drawn (snapshots).
+/// null when the mascot is not drawn (turned off in the config, and in snapshots).
 mascot: ?Mascot,
 /// Notice drawn above the mascot (e.g. an update is available).
 note: [160]u8 = undefined,
@@ -43,7 +43,7 @@ pub fn create(font_name: [*:0]const u8, font_size_px: f64, mascot: bool) !*Rende
         .atlas = atlas,
         .state = state,
         .frame = frame,
-        .mascot = if (mascot) .{ .greeted_ms = nowMs() } else null,
+        .mascot = if (mascot) .init(nowMs()) else null,
     };
     return self;
 }
@@ -85,6 +85,17 @@ pub fn setFont(self: *Renderer, font_name: [*:0]const u8, font_size_px: f64) err
 pub fn setNote(self: *Renderer, text: []const u8) void {
     self.note_len = @min(text.len, self.note.len);
     @memcpy(self.note[0..self.note_len], text[0..self.note_len]);
+}
+
+/// Turns the mascot on (with its greeting) or off.
+pub fn setMascot(self: *Renderer, on: bool) void {
+    if (on == (self.mascot != null)) return;
+    self.mascot = if (on) .init(nowMs()) else null;
+}
+
+/// Something happened in the pane, so the mascot's idle loop goes on for a while longer.
+pub fn wakeMascot(self: *Renderer) void {
+    if (self.mascot) |*mascot| mascot.wake(nowMs());
 }
 
 /// Plays the mascot's greeting again if the cell (col, row) is on it. Returns whether it was.

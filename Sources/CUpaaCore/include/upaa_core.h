@@ -35,6 +35,8 @@ typedef struct {
     // Cells.
     uint16_t window_width;
     uint16_t window_height;
+    // Whether the axolotl is drawn behind the text.
+    bool mascot;
     // The lines that could not be read, as many as fit. Valid while the config lives.
     const UpaaConfigProblem *problems;
     size_t problem_count;
@@ -220,7 +222,7 @@ typedef struct {
     bool cursor_visible;
     // The find bar's search has more of the scrollback to go through: draw again soon.
     bool searching;
-    // Milliseconds until the mascot changes, when the screen should be drawn again. 0 if nothing is waiting.
+    // Milliseconds until the mascot changes, when the screen should be drawn again. 0 if nothing is waiting (it rests).
     uint32_t mascot_next_ms;
 } UpaaFrame;
 
@@ -234,6 +236,11 @@ void upaa_renderer_free(UpaaRenderer *renderer);
 UpaaMetrics upaa_renderer_metrics(UpaaRenderer *renderer);
 // Notice drawn above the mascot (e.g. an update is available). ASCII.
 void upaa_renderer_set_note(UpaaRenderer *renderer, const char *text);
+// Turns the mascot on (with its greeting) or off.
+void upaa_renderer_set_mascot(UpaaRenderer *renderer, bool on);
+// Something happened in the pane (output, a key, a click), so the mascot's idle loop goes on for a while longer.
+// After a while with nothing, it rests and mascot_next_ms is 0.
+void upaa_renderer_wake_mascot(UpaaRenderer *renderer);
 // Plays the mascot's greeting again if the cell (col, row) is on it. Returns whether it was.
 bool upaa_renderer_poke_mascot(UpaaRenderer *renderer, int32_t col, int32_t row);
 // Atlas image. 1 byte per pixel; each side is upaa_renderer_atlas_size pixels.

@@ -21,6 +21,8 @@ background_opacity: f64 = 0.8,
 /// Cells.
 window_width: u16 = 80,
 window_height: u16 = 24,
+/// Whether the axolotl is drawn behind the text.
+mascot: bool = true,
 /// null takes design A3's color for light or dark mode (Theme).
 foreground: ?vt.GhosttyColorRgb = null,
 background: ?vt.GhosttyColorRgb = null,
@@ -47,6 +49,7 @@ pub const Values = extern struct {
     background_opacity: f64,
     window_width: u16,
     window_height: u16,
+    mascot: bool,
     /// The lines that could not be read.
     problems: [*]const Problem,
     problem_count: usize,
@@ -81,6 +84,7 @@ pub fn values(config: *const Config) Values {
         .background_opacity = config.background_opacity,
         .window_width = config.window_width,
         .window_height = config.window_height,
+        .mascot = config.mascot,
         .problems = &config.problems,
         .problem_count = config.problem_count,
     };
@@ -155,6 +159,10 @@ fn set(config: *Config, key: []const u8, value: []const u8) error{ UnknownKey, I
         config.window_width = try cells(value, 10);
     } else if (std.mem.eql(u8, key, "window-height")) {
         config.window_height = try cells(value, 4);
+    } else if (std.mem.eql(u8, key, "mascot")) {
+        const on = std.mem.eql(u8, value, "true");
+        if (!on and !std.mem.eql(u8, value, "false")) return error.InvalidValue;
+        config.mascot = on;
     } else if (std.mem.eql(u8, key, "foreground")) {
         config.foreground = try color(value);
     } else if (std.mem.eql(u8, key, "background")) {
@@ -207,6 +215,7 @@ test "defaults" {
     try std.testing.expectEqual(@as(f64, 0.8), v.background_opacity);
     try std.testing.expectEqual(@as(u16, 80), v.window_width);
     try std.testing.expectEqual(@as(u16, 24), v.window_height);
+    try std.testing.expect(v.mascot);
     try std.testing.expectEqual(@as(usize, 0), v.problem_count);
 }
 
@@ -218,6 +227,7 @@ test "settings, and the lines that cannot be read" {
         \\background-opacity = 1
         \\window-width = 100
         \\window-height=30
+        \\mascot = false
         \\
         \\background = #1e1e2e
         \\palette = 1 = #ff0000
@@ -231,12 +241,13 @@ test "settings, and the lines that cannot be read" {
     try std.testing.expectEqual(@as(f64, 1), v.background_opacity);
     try std.testing.expectEqual(@as(u16, 100), v.window_width);
     try std.testing.expectEqual(@as(u16, 30), v.window_height);
+    try std.testing.expect(!v.mascot);
     try std.testing.expectEqual(vt.GhosttyColorRgb{ .r = 0x1e, .g = 0x1e, .b = 0x2e }, config.background.?);
     try std.testing.expectEqual(vt.GhosttyColorRgb{ .r = 0xff, .g = 0, .b = 0 }, config.palette[1].?);
     try std.testing.expect(config.palette[2] == null);
     try std.testing.expectEqualSlices(Problem, &.{
-        .{ .line = 10, .key_start = @intCast(std.mem.indexOf(u8, text, "bogus").?), .key_len = 5, .kind = .unknown_key },
-        .{ .line = 11, .key_start = @intCast(std.mem.lastIndexOf(u8, text, "font-size").?), .key_len = 9, .kind = .invalid_value },
+        .{ .line = 11, .key_start = @intCast(std.mem.indexOf(u8, text, "bogus").?), .key_len = 5, .kind = .unknown_key },
+        .{ .line = 12, .key_start = @intCast(std.mem.lastIndexOf(u8, text, "font-size").?), .key_len = 9, .kind = .invalid_value },
     }, v.problems[0..v.problem_count]);
 
     const bad = parse("window-width = 3\nwindow-width = 120\nno equals sign");

@@ -40,6 +40,10 @@ final class Renderer {
 
     /// How much of the default background color covers what is behind the view (0 to 1).
     let backgroundOpacity: Double
+    /// Whether the axolotl is drawn behind the text. Turning it on plays its greeting.
+    var mascot: Bool {
+        didSet { upaa_renderer_set_mascot(handle, mascot) }
+    }
 
     /// fontName is the font, then its fallbacks, one per line. fontSize is in points; scale is the screen scale factor
     /// (2 on Retina). mascot draws the axolotl behind the text.
@@ -50,6 +54,7 @@ final class Renderer {
         self.device = device
         self.scale = scale
         self.backgroundOpacity = backgroundOpacity
+        self.mascot = mascot
         let metrics = upaa_renderer_metrics(handle)
         cellSize = (Int(metrics.cell_width), Int(metrics.cell_height))
         underline = SIMD2(Float(metrics.underline_offset), Float(metrics.underline_thickness))
@@ -183,6 +188,11 @@ final class Renderer {
     /// Notice drawn above the mascot (e.g. an update is available).
     func setNote(_ text: String) {
         upaa_renderer_set_note(handle, text)
+    }
+
+    /// Something happened in the view, so the mascot's idle loop goes on for a while longer before it rests.
+    func wakeMascot() {
+        upaa_renderer_wake_mascot(handle)
     }
 
     /// Plays the mascot's greeting again if the point (drawable pixels from the top-left) is on it. Returns whether it was.
