@@ -107,12 +107,13 @@ jobs:
             # reopen: no config file, with a second tab (Cmd-T) moved to /usr, closed (Cmd-W) and opened again (Cmd-Shift-T).
             # find: no config file, with a line echoed and the find bar (Cmd-F) looking for a word in it.
             # changes: no config file, in the repository above, with the right panel shown (Cmd-J).
-            # ja: no config file, in Japanese, and its Settings window (Cmd-,) as well. The others are in English.
+            # ja: with the config file, in Japanese, and its Settings window (Cmd-,) as well, so the problems show in Japanese.
+            # The others are in English.
             # dark: no config file, with the runner switched to dark mode.
             conf="$name"
             lang=en
             case "$name" in top | tabs | reopen | find | changes) conf=default ;; esac
-            if [ "$name" = ja ]; then conf=default; lang=ja; fi
+            if [ "$name" = ja ]; then conf=config; lang=ja; fi
             if [ "$name" = dark ]; then
               conf=default
               osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
@@ -321,7 +322,7 @@ jobs:
             "A second tab running top, the first with new output: ![tabs]($url/tabs.png)" '' \
             "A closed tab opened again in /usr (Cmd-Shift-T): ![reopen]($url/reopen.png)" '' \
             "Find (Cmd-F): ![find]($url/find.png)" '' \
-            "In Japanese: ![ja]($url/ja.png)" '' \
+            "In Japanese, with the config file: ![ja]($url/ja.png)" '' \
             "Changes panel with lines wider than it (Cmd-J): ![changes]($url/changes.png)" '' \
             "In dark mode: ![dark]($url/dark.png)" > ../comment.md
           if [ -f ../shots/settings.png ]; then printf '\n%s\n' "Settings (Cmd-,): ![settings]($url/settings.png)" >> ../comment.md; fi
