@@ -288,8 +288,8 @@ jobs:
             kill -0 "$pid" 2>/dev/null && { echo "upaa did not quit on Cmd-Q"; kill "$pid"; exit 1; }
             build/upaa.app/Contents/MacOS/upaa -AppleLanguages '(en)' &
             pid=$!
-            swift "$dir/window.swift" "$pid" wait > /dev/null
-            sleep 1
+            # Restored windows can come one after another, so this keeps a fixed wait rather than going on at the first.
+            sleep 5
             after="$(swift "$dir/frames.swift" "$pid")"
             kill "$pid"
             wait "$pid" || true
