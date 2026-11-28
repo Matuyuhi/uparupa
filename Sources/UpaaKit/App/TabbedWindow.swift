@@ -5,12 +5,12 @@ import AppKit
 /// program set.
 /// A split view controller holds the tab list as its sidebar, the selected tab in the middle with a footer under it
 /// (the shell, the focused pane's size, what in the config could not be used and the main keys), and the changed files
-/// of the focused pane's git repository as the right panel (Cmd-J). The toolbar holds the split buttons and the right
-/// panel's, and shows the tab's name with its directory and branch. Cmd-B hides the tab list, and the tabs move into
-/// the toolbar, in place of the title (design A3, tabs along the top). Where the traffic lights, the glass, the toolbar
-/// and the panels go, and how they move, is AppKit's. Behind them all is one card of the terminal's background color,
-/// translucent over a color gradient; the terminal draws no background of its own and runs up under the toolbar, its
-/// text below it.
+/// of the focused pane's git repository (Cmd-J) or the web addresses the tab's panes printed (Shift-Cmd-J) as the right
+/// panel. The toolbar holds the split buttons and the right panel's, and shows the tab's name with its directory and
+/// branch. Cmd-B hides the tab list, and the tabs move into the toolbar, in place of the title (design A3, tabs along
+/// the top). Where the traffic lights, the glass, the toolbar and the panels go, and how they move, is AppKit's.
+/// Behind them all is one card of the terminal's background color, translucent over a color gradient; the terminal
+/// draws no background of its own and runs up under the toolbar, its text below it.
 /// The menu actions reach this object through the responder chain, as the window's delegate.
 final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     private final class Tab {
@@ -65,6 +65,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         }
     }
     private let changes = ChangesPanel()
+    private let links = LinksPanel()
     private var panel: NSSplitViewItem!
     /// The focused pane's branch, from the last read of the changes.
     private var branch: String?
@@ -91,10 +92,17 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         let sidebar = NSSplitViewItem(sidebarWithViewController: tabList)
         sidebar.minimumThickness = 180
         sidebar.maximumThickness = 360
+        // The panel holds both views, one of them hidden.
+        let sides = NSView()
+        for view in [changes, links] {
+            sides.addSubview(view)
+            view.pin(to: sides)
+        }
+        links.isHidden = true
         if #available(macOS 14.0, *) {
-            panel = NSSplitViewItem(inspectorWithViewController: Self.controller(changes, inset: 8))
+            panel = NSSplitViewItem(inspectorWithViewController: Self.controller(sides, inset: 8))
         } else {
-            panel = NSSplitViewItem(viewController: Self.controller(changes, inset: 8))
+            panel = NSSplitViewItem(viewController: Self.controller(sides, inset: 8))
             panel.canCollapse = true
         }
         panel.minimumThickness = Chrome.sidePanelWidth
@@ -155,10 +163,10 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         watch(first)
         tabs.append(Tab(first))
         select(0)
-        // The tabs follow the shells' directories and programs, and the panel the files, without a signal from any.
+        // The tabs follow the shells' directories and programs, and the panel the files and links, without a signal from any.
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refresh()
-            self?.readChanges()
+            self?.readPanels()
         }
     }
 
@@ -315,9 +323,10 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     private static let findButton = NSToolbarItem.Identifier("find")
     private static let panelEdge = NSToolbarItem.Identifier("panelEdge")
     private static let panelButton = NSToolbarItem.Identifier("panel")
+    private static let linksButton = NSToolbarItem.Identifier("links")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.tabsEdge, .flexibleSpace, Self.splitRight, Self.splitDown, Self.findButton, Self.panelEdge, Self.panelButton]
+        [Self.tabsEdge, .flexibleSpace, Self.splitRight, Self.splitDown, Self.findButton, Self.panelEdge, Self.panelButton, Self.linksButton]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -335,6 +344,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         case Self.splitDown: return button(identifier, "rectangle.split.1x2", String(localized: "Split Down (⇧⌘D)"), #selector(splitDown(_:)))
         case Self.findButton: return button(identifier, "magnifyingglass", String(localized: "Find (⌘F)"), #selector(showFindBar(_:)))
         case Self.panelButton: return button(identifier, "sidebar.right", String(localized: "Changes Panel (⌘J)"), #selector(toggleSidePanel(_:)))
+        case Self.linksButton: return button(identifier, "link", String(localized: "Links Panel (⇧⌘J)"), #selector(toggleLinksPanel(_:)))
         case Self.newTabButton: return button(identifier, "plus", String(localized: "New Tab (⌘T)"), #selector(newTab(_:)))
         case Self.tabsItem:
             let item = NSToolbarItem(itemIdentifier: identifier)
@@ -454,10 +464,33 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         tabs[selected].focus.showFindBar(sender)
     }
 
-    /// Cmd-J. Shows or hides the right panel, as AppKit animates a split view's panel.
+    /// Cmd-J. Shows the right panel with the changes, or hides it if it shows them, as AppKit animates a split view's
+    /// panel.
     @objc func toggleSidePanel(_ sender: Any?) {
-        panel.animator().isCollapsed = !panel.isCollapsed
-        readChanges()
+        togglePanel(links: false)
+    }
+
+    /// Shift-Cmd-J. Shows the right panel with the links, or hides it if it shows them.
+    @objc func toggleLinksPanel(_ sender: Any?) {
+        togglePanel(links: true)
+    }
+
+    private func togglePanel(links: Bool) {
+        if !panel.isCollapsed, self.links.isHidden == !links {
+            panel.animator().isCollapsed = true
+        } else {
+            // Switching views in the open panel fades one into the other.
+            if !panel.isCollapsed, let sides = changes.superview {
+                sides.wantsLayer = true
+                let fade = CATransition()
+                fade.duration = Chrome.animation
+                sides.layer?.add(fade, forKey: "switch")
+            }
+            self.links.isHidden = !links
+            changes.isHidden = links
+            panel.animator().isCollapsed = false
+        }
+        readPanels()
     }
 
     // MARK: Tabs and panes
@@ -476,7 +509,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
             guard let self, let terminal, let tab = self.tab(of: terminal) else { return }
             tab.focus = terminal
             self.refresh()
-            self.readChanges()
+            self.readPanels()
         }
         terminal.session.onExit = { [weak self, weak terminal] in
             if let self, let terminal { self.close(terminal) }
@@ -583,7 +616,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         tab.unseen = false
         window.makeFirstResponder(tab.focus)
         refresh()
-        readChanges()
+        readPanels()
     }
 
     /// Puts the tab in the host, in place of the one shown. A pane that was in a split view keeps what the split view
@@ -596,8 +629,19 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         host.needsLayout = true
     }
 
-    /// Reads the git state of the focused pane's directory, for the panel, the change count and the branch.
-    private func readChanges() {
+    /// Reads the git state of the focused pane's directory, for the panel, the change count and the branch; and what
+    /// every pane printed, for the links. A pane in a tab not shown is read too, so each link has the time it came.
+    private func readPanels() {
+        for pane in tabs.flatMap(\.panes) { pane.session.readLinks() }
+        // The selected tab's links, newest first. One printed in two panes is listed once, from when it first came.
+        var listed = Set<String>()
+        let shown = tabs[selected].panes.flatMap(\.session.links).sorted { $0.seen < $1.seen }
+            .filter { listed.insert($0.address).inserted }.reversed()
+        links.show(Array(shown))
+        if #available(macOS 26.0, *) {
+            let item = window.toolbar?.items.first { $0.itemIdentifier == Self.linksButton }
+            item?.badge = shown.isEmpty ? nil : .count(shown.count)
+        }
         guard window.occlusionState.contains(.visible) else { return }
         changes.refresh(directory: tabs[selected].focus.session.cwd)
     }

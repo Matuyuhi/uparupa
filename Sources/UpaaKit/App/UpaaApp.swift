@@ -117,6 +117,7 @@ public enum UpaaApp {
         // AppKit names the item Show or Hide Sidebar as the tab list is hidden or shown.
         viewItem.submenu?.addItem(withTitle: String(localized: "Show Sidebar"), action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "b")
         viewItem.submenu?.addItem(withTitle: String(localized: "Changes Panel"), action: #selector(TabbedWindow.toggleSidePanel(_:)), keyEquivalent: "j")
+        viewItem.submenu?.addItem(withTitle: String(localized: "Links Panel"), action: #selector(TabbedWindow.toggleLinksPanel(_:)), keyEquivalent: "J")
         viewItem.submenu?.addItem(.separator())
         viewItem.submenu?.addItem(withTitle: String(localized: "Default Font Size"), action: #selector(AppDelegate.defaultFontSize(_:)), keyEquivalent: "0")
         viewItem.submenu?.addItem(withTitle: String(localized: "Bigger"), action: #selector(AppDelegate.biggerFont(_:)), keyEquivalent: "+")
