@@ -63,7 +63,11 @@ pid=
 launch() {
   # Each launch starts at the default size, with no config file, and without the daily update check.
   defaults delete local.upaa 2>/dev/null || true
-  XDG_CONFIG_HOME="$out/config" UPAA_NO_UPDATE_CHECK=1 "$bin" -AppleLanguages '(en)' &
+  XDG_CONFIG_HOME="$out/config" UPAA_NO_UPDATE_CHECK=1 "$bin" -AppleLanguages '(en)' > /dev/null &
+  pid=$!
+}
+calculator() {
+  /System/Applications/Calculator.app/Contents/MacOS/Calculator > /dev/null 2>&1 &
   pid=$!
 }
 quit() {
@@ -113,15 +117,28 @@ timed() {
   record "$1_app_cpu_s" "$(calc 2 "$(cpu) - $before")"
 }
 
-# Launch: from starting the process to its window on screen, the middle of three.
+# From starting the process to its window on screen, the middle of three. Calculator's, for how fast the runner opens
+# any app's window, and upaa --version's, for the part before AppKit starts.
+launch_time() {
+  : > "$out/launch.txt"
+  for i in 1 2 3; do
+    start=$(now)
+    "$1"
+    wait_window
+    echo "$(calc 3 "$(now) - $start")" >> "$out/launch.txt"
+    quit
+  done
+  sort -n "$out/launch.txt" | sed -n 2p
+}
+record launch_to_window_s "$(launch_time launch)"
+record calculator_launch_to_window_s "$(launch_time calculator)"
+: > "$out/version.txt"
 for i in 1 2 3; do
   start=$(now)
-  launch
-  wait_window
-  echo "$(calc 3 "$(now) - $start")" >> "$out/launch.txt"
-  quit
+  "$bin" --version > /dev/null
+  echo "$(calc 3 "$(now) - $start")" >> "$out/version.txt"
 done
-record launch_to_window_s "$(sort -n "$out/launch.txt" | sed -n 2p)"
+record version_exit_s "$(sort -n "$out/version.txt" | sed -n 2p)"
 
 launch
 wait_window
@@ -157,5 +174,5 @@ record five_panes_footprint_mib "$(footprint)"
 quit
 defaults delete local.upaa 2>/dev/null || true
 
-awk -F '\t' 'BEGIN { printf "{" } { printf "%s\"%s\": %s", NR > 1 ? ", " : "", $1, $2 } END { print "}" }' "$results" > "$out/results.json"
+awk -F '\t' 'BEGIN { printf "{" } { printf "%s\"%s\": %s", (NR > 1 ? ", " : ""), $1, $2 } END { print "}" }' "$results" > "$out/results.json"
 cat "$out/results.json"
