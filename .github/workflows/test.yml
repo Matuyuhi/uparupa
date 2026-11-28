@@ -105,7 +105,7 @@ jobs:
           for name in default config top tabs reopen find ja changes dark; do
             # top: no config file, with the tab list hidden (Cmd-B), so the tabs are in the toolbar, and a second tab opened there (Cmd-T),
             # while the first one prints a line, for its dot of new output.
-            # tabs: no config file, with a second tab (Cmd-T) running top, while the first one prints a line, for its dot of new output.
+            # tabs: no config file, with a second tab (Cmd-T) showing /etc/shells in less, whose screen is the same on every run, while the first one prints a line, for its dot of new output.
             # reopen: no config file, with a second tab (Cmd-T) moved to /usr, closed (Cmd-W) and opened again (Cmd-Shift-T).
             # find: no config file, with a line echoed and the find bar (Cmd-F) looking for a word in it.
             # changes: no config file, in the repository above, with the right panel shown (Cmd-J).
@@ -142,8 +142,8 @@ jobs:
                 -e 'delay 0.5' \
                 -e 'tell application "System Events" to keystroke "t" using command down' \
                 -e 'delay 1' \
-                -e 'tell application "System Events" to keystroke "top"' \
-                -e 'tell application "System Events" to key code 36' || echo "could not press Cmd-T, run top"
+                -e 'tell application "System Events" to keystroke "less /etc/shells"' \
+                -e 'tell application "System Events" to key code 36' || echo "could not press Cmd-T, run less"
               # The tab list reads the programs every 3 seconds.
               sleep 5
             fi
@@ -309,7 +309,8 @@ jobs:
           gh run download "$GITHUB_RUN_ID" --name launch-screenshots --dir shots
           # main's pictures: those of the commit this pull request was tested on, or else the latest ones of main.
           runs="$(gh api "repos/$GH_REPO/actions/artifacts?name=launch-screenshots&per_page=100" --paginate \
-            --jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$BASE\" or .workflow_run.head_branch == \"main\")
+            --jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id)
+              | select(.workflow_run.head_sha == \"$BASE\" or .workflow_run.head_branch == \"main\")
               | \"\(.workflow_run.head_sha) \(.workflow_run.id)\"")"
           main="$(printf '%s\n' "$runs" | awk -v base="$BASE" '$1 == base { print; exit }')"
           [ -n "$main" ] || main="$(printf '%s\n' "$runs" | awk 'NR == 1')"
@@ -331,14 +332,20 @@ jobs:
               continue
             fi
             cp "main/$name.png" "$out/main-$name.png"
-            before="$(identify -format '%wx%h' "main/$name.png")"
-            after="$(identify -format '%wx%h' "shots/$name.png")"
+            before="$(identify -format '%wx%h' "main/$name.png")" || before=unreadable
+            after="$(identify -format '%wx%h' "shots/$name.png")" || after=unreadable
             if [ "$before" != "$after" ]; then
               changed="$changed### $label: $before → $after"$'\n\n'"| main | this pull request |"$'\n'"| --- | --- |"$'\n'
               changed="$changed| ![main]($url/main-$name.png) | ![$name]($url/$name.png) |"$'\n\n'
               continue
             fi
-            pixels="$(compare -fuzz 20% -metric AE "main/$name.png" "shots/$name.png" "$out/diff-$name.png" 2>&1 || true)"
+            # compare exits with 1 when the pictures differ, and with 2 when it could not compare them.
+            status=0
+            pixels="$(compare -fuzz 20% -metric AE "main/$name.png" "shots/$name.png" "$out/diff-$name.png" 2>&1)" || status=$?
+            if [ "$status" -gt 1 ]; then
+              changed="$changed### $label: could not compare ($pixels)"$'\n\n'"![$name]($url/$name.png)"$'\n\n'
+              continue
+            fi
             share="$(awk -v p="$pixels" -v size="$after" 'BEGIN { split(size, s, "x"); printf "%.2f", 100 * p / (s[1] * s[2]) }')"
             if awk -v share="$share" 'BEGIN { exit !(share > 0.05) }'; then
               changed="$changed### $label: $share% changed"$'\n\n'"| main | this pull request | difference |"$'\n'"| --- | --- | --- |"$'\n'
@@ -351,7 +358,7 @@ jobs:
           default|Without a config file
           config|With a config file
           top|Tabs along the top (Cmd-B), the first with new output
-          tabs|A second tab running top, the first with new output
+          tabs|A second tab running less, the first with new output
           reopen|A closed tab opened again in /usr (Cmd-Shift-T)
           find|Find (Cmd-F)
           ja|In Japanese, with the config file
