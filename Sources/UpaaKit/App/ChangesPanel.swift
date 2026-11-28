@@ -111,23 +111,33 @@ final class ChangesPanel: NSView {
             add(Chrome.label(String(localized: "Not a git repository"), size: 11, color: .secondaryLabelColor), inset: 6)
             return
         }
-        add(Chrome.label(([String(localized: "Changes")] + [state.branch].compactMap { $0 }).joined(separator: " · "), size: 11,
-                         weight: .semibold, color: .secondaryLabelColor), inset: 6)
+        // The heading, and a button that closes the panel as Cmd-J does.
+        let close = NSButton()
+        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: String(localized: "Close Changes Panel"))?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        close.action = #selector(TabbedWindow.toggleSidePanel(_:))
+        close.isBordered = false
+        close.contentTintColor = .secondaryLabelColor
+        close.toolTip = String(localized: "Close Changes Panel")
+        let heading = NSStackView(views: [
+            Chrome.label(([String(localized: "Changes")] + [state.branch].compactMap { $0 }).joined(separator: " · "), size: 11,
+                         weight: .semibold, color: .secondaryLabelColor),
+            NSView(), close,
+        ])
+        add(heading, inset: 6)
         if state.files.isEmpty { add(Chrome.label(String(localized: "No changes"), size: 12, color: .secondaryLabelColor), inset: 6, top: 6) }
+        // The files, as chips that wrap to the next row (the design's M5).
+        let chips = Flow()
         for file in state.files {
             let selected = file.path == state.selected
-            var views: [NSView] = [Chrome.label(file.path, size: 12, weight: selected ? .medium : .regular, mono: true)]
-            views.append(NSView())
-            if file.isNew {
-                views.append(Chrome.label(String(localized: "New"), size: 11, color: Chrome.added))
-            }
-            if let added = file.added { views.append(Chrome.label("+\(added)", size: 11, mono: true, color: Chrome.added)) }
-            if let removed = file.removed { views.append(Chrome.label("−\(removed)", size: 11, mono: true, color: Chrome.removed)) }
-            let row = Clickable(cornerRadius: 9, selected: selected, views, spacing: 6,
-                                padding: NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8))
-            row.onClick = { [weak self] in self?.select(file.path) }
-            add(row)
+            let label = Chrome.label(file.path, size: 11, weight: selected ? .medium : .regular, mono: true,
+                                     color: selected ? .labelColor : .secondaryLabelColor)
+            let chip = Clickable(cornerRadius: 10, selected: selected, [label],
+                                 padding: NSEdgeInsets(top: 3, left: 10, bottom: 3, right: 10))
+            chip.onClick = { [weak self] in self?.select(file.path) }
+            chips.addSubview(chip)
         }
+        if !state.files.isEmpty { add(chips, inset: 2, top: 8) }
         guard !state.diff.isEmpty else { return }
         let diff = NSStackView()
         diff.orientation = .vertical
@@ -226,6 +236,45 @@ final class ChangesPanel: NSView {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return process.terminationStatus <= 1 ? String(decoding: data, as: UTF8.self) : nil
+    }
+}
+
+/// Lays its subviews out left to right in rows, wrapping at its own width, and is as high as its rows.
+private final class Flow: NSView {
+    private let spacing: CGFloat = 4
+
+    override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: arrange(apply: false))
+    }
+
+    override func setFrameSize(_ size: NSSize) {
+        let widthChanged = size.width != frame.width
+        super.setFrameSize(size)
+        if widthChanged { invalidateIntrinsicContentSize() }
+    }
+
+    override func layout() {
+        super.layout()
+        arrange(apply: true)
+    }
+
+    /// Places the subviews when apply, and returns the height of their rows.
+    @discardableResult private func arrange(apply: Bool) -> CGFloat {
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.fittingSize
+            if x > 0, x + size.width > bounds.width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            if apply { view.frame = NSRect(x: x, y: y, width: min(size.width, bounds.width), height: size.height) }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return y + rowHeight
     }
 }
 

@@ -68,7 +68,7 @@
 "Not a git repository" = "git のリポジトリではありません";
 "Changes" = "変更";
 "No changes" = "変更はありません";
-"New" = "新規";
+"Close Changes Panel" = "右パネルを閉じる";
 
 /* Settings */
 "Settings" = "設定";
