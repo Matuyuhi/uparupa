@@ -75,11 +75,13 @@ jobs:
 
       # Open the real window and photograph it, without and with a config file. The file has two lines upaa cannot read,
       # for the footer and Settings to show.
-      # Only a launch failure, a crash or a missing window fails here; the pictures are kept to look at, not compared.
+      # Only a launch failure, a crash or a missing window fails here; screenshots-comment compares the pictures with main's.
       - name: Launch screenshots
         env:
           UPAA_NO_UPDATE_CHECK: "1"
         run: |
+          # The shell prompt shows the host name, which differs on every runner; one name keeps it out of the comparison.
+          sudo scutil --set HostName upaa-ci
           dir=build/screenshots
           mkdir -p "$dir/default/upaa" "$dir/config/upaa"
           printf '%s\n' 'font-family = Menlo' 'font-family = Apple Color Emoji' 'font-size = 16' 'foreground = #cdd6f4' 'background = #1e1e2e' 'window-width = 100' \
@@ -277,9 +279,10 @@ jobs:
           name: snapshots
           path: build/snapshots
 
-  # Show the launch screenshots on the pull request, in one comment edited on each push.
+  # Show the launch screenshots on the pull request next to main's, in one comment edited on each push.
   # gh pr comment --attach refuses the workflow token, so the pictures go on the ci-screenshots branch,
   # which holds one commit with the latest pictures of each pull request, and the comment links to them.
+  # A changed picture does not fail anything: a change to how upaa looks is often the point of the pull request.
   # A separate job, so the job that builds and runs the pull request's code keeps a read-only token.
   # A pull request from a fork never gets write access, so it is skipped there.
   screenshots-comment:
@@ -296,36 +299,99 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       SHA: ${{ github.event.pull_request.head.sha }}
+      BASE: ${{ github.event.pull_request.base.sha }}
     steps:
       - name: Post the launch screenshots
         run: |
+          # A run of an older push that ends after a newer one leaves the pictures and the comment alone.
+          current() { [ "$(gh api "repos/$GH_REPO/pulls/$PR" --jq .head.sha)" = "$SHA" ] || { echo "#$PR is no longer at $SHA"; exit 0; }; }
+          current
           gh run download "$GITHUB_RUN_ID" --name launch-screenshots --dir shots
+          # main's pictures: those of the commit this pull request was tested on, or else the latest ones of main.
+          runs="$(gh api "repos/$GH_REPO/actions/artifacts?name=launch-screenshots&per_page=100" --paginate \
+            --jq ".artifacts[] | select(.expired | not) | select(.workflow_run.head_sha == \"$BASE\" or .workflow_run.head_branch == \"main\")
+              | \"\(.workflow_run.head_sha) \(.workflow_run.id)\"")"
+          main="$(printf '%s\n' "$runs" | awk -v base="$BASE" '$1 == base { print; exit }')"
+          [ -n "$main" ] || main="$(printf '%s\n' "$runs" | awk 'NR == 1')"
+          [ -z "$main" ] || gh run download "${main#* }" --name launch-screenshots --dir main || main=
+          command -v compare > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick > /dev/null; }
+          out="pr-$PR/$SHA"
+          mkdir -p "$out"
+          cp shots/*.png "$out/"
+          url="https://raw.githubusercontent.com/$GH_REPO/ci-screenshots/$out"
+          # A pixel counts as changed when its color moves by more than 20%, which leaves out anti-aliasing,
+          # and a screen when over 0.05% of its pixels changed, which leaves out the mascot's gills swaying between poses.
+          changed= unchanged= all=
+          while IFS='|' read -r name label; do
+            [ -f "shots/$name.png" ] || continue
+            all="$all$label: ![$name]($url/$name.png)"$'\n\n'
+            [ -n "$main" ] || continue
+            if [ ! -f "main/$name.png" ]; then
+              changed="$changed### $label: new"$'\n\n'"![$name]($url/$name.png)"$'\n\n'
+              continue
+            fi
+            cp "main/$name.png" "$out/main-$name.png"
+            before="$(identify -format '%wx%h' "main/$name.png")"
+            after="$(identify -format '%wx%h' "shots/$name.png")"
+            if [ "$before" != "$after" ]; then
+              changed="$changed### $label: $before → $after"$'\n\n'"| main | this pull request |"$'\n'"| --- | --- |"$'\n'
+              changed="$changed| ![main]($url/main-$name.png) | ![$name]($url/$name.png) |"$'\n\n'
+              continue
+            fi
+            pixels="$(compare -fuzz 20% -metric AE "main/$name.png" "shots/$name.png" "$out/diff-$name.png" 2>&1 || true)"
+            share="$(awk -v p="$pixels" -v size="$after" 'BEGIN { split(size, s, "x"); printf "%.2f", 100 * p / (s[1] * s[2]) }')"
+            if awk -v share="$share" 'BEGIN { exit !(share > 0.05) }'; then
+              changed="$changed### $label: $share% changed"$'\n\n'"| main | this pull request | difference |"$'\n'"| --- | --- | --- |"$'\n'
+              changed="$changed| ![main]($url/main-$name.png) | ![$name]($url/$name.png) | ![difference]($url/diff-$name.png) |"$'\n\n'
+            else
+              rm "$out/diff-$name.png"
+              unchanged="$unchanged${unchanged:+, }$label"
+            fi
+          done <<'SHOTS'
+          default|Without a config file
+          config|With a config file
+          top|Tabs along the top (Cmd-B), the first with new output
+          tabs|A second tab running top, the first with new output
+          reopen|A closed tab opened again in /usr (Cmd-Shift-T)
+          find|Find (Cmd-F)
+          ja|In Japanese, with the config file
+          changes|Changes panel with lines wider than it (Cmd-J)
+          dark|In dark mode
+          settings|Settings (Cmd-,)
+          settings-ja|Settings in Japanese
+          settings-reload|Settings after the file is fixed and font-size = 20 is added
+          SHOTS
+          {
+            if [ -z "$main" ]; then
+              printf '%s\n\n%s' "Launch screenshots for $SHA. main has no pictures to compare them with." "$all"
+            else
+              note=
+              [ "${main%% *}" = "$BASE" ] || note=" (the pictures of the base $BASE are not ready, so these are main's latest)"
+              printf '%s\n\n' "Launch screenshots for $SHA, compared with main at ${main%% *}$note."
+              printf '%s' "$changed"
+              [ -n "$changed" ] || printf '%s\n\n' 'No screen changed.'
+              [ -z "$unchanged" ] || printf '%s\n\n' "Unchanged: $unchanged."
+              printf '<details><summary>%s</summary>\n\n%s</details>\n' 'All screenshots of this pull request' "$all"
+            fi
+          } > comment.md
           git init -q store
           cd store
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git remote add origin "https://x-access-token:$GH_TOKEN@github.com/$GH_REPO.git"
-          if git fetch -q --depth 1 origin ci-screenshots; then git checkout -q FETCH_HEAD; fi
-          # A new commit with no parent each time, so old pictures do not pile up in the history.
-          git checkout -q --orphan next
-          rm -rf "pr-$PR"
-          mkdir -p "pr-$PR/$SHA"
-          cp ../shots/*.png "pr-$PR/$SHA/"
-          git add -A
-          git commit -q -m "Launch screenshots of #$PR at $SHA"
-          git push -q --force origin HEAD:ci-screenshots
-          url="https://raw.githubusercontent.com/$GH_REPO/ci-screenshots/pr-$PR/$SHA"
-          printf '%s\n' "Launch screenshots for $SHA" '' \
-            "Without a config file: ![default]($url/default.png)" '' \
-            "With a config file: ![config]($url/config.png)" '' \
-            "Tabs along the top (Cmd-B), the first with new output: ![top]($url/top.png)" '' \
-            "A second tab running top, the first with new output: ![tabs]($url/tabs.png)" '' \
-            "A closed tab opened again in /usr (Cmd-Shift-T): ![reopen]($url/reopen.png)" '' \
-            "Find (Cmd-F): ![find]($url/find.png)" '' \
-            "In Japanese, with the config file: ![ja]($url/ja.png)" '' \
-            "Changes panel with lines wider than it (Cmd-J): ![changes]($url/changes.png)" '' \
-            "In dark mode: ![dark]($url/dark.png)" > ../comment.md
-          if [ -f ../shots/settings.png ]; then printf '\n%s\n' "Settings (Cmd-,): ![settings]($url/settings.png)" >> ../comment.md; fi
-          if [ -f ../shots/settings-ja.png ]; then printf '\n%s\n' "Settings in Japanese: ![settings-ja]($url/settings-ja.png)" >> ../comment.md; fi
-          if [ -f ../shots/settings-reload.png ]; then printf '\n%s\n' "Settings after the file is fixed and font-size = 20 is added: ![settings-reload]($url/settings-reload.png)" >> ../comment.md; fi
+          # Pull requests push here at the same time, so the push is made again on the latest commit if another one won.
+          for attempt in 1 2 3; do
+            last=
+            if git fetch -q --depth 1 origin ci-screenshots; then git checkout -q -f FETCH_HEAD; last="$(git rev-parse HEAD)"; fi
+            # A new commit with no parent each time, so old pictures do not pile up in the history.
+            git checkout -q --orphan "next-$attempt"
+            rm -rf "pr-$PR"
+            mkdir -p "pr-$PR"
+            cp -R "../$out" "pr-$PR/"
+            git add -A
+            git commit -q -m "Launch screenshots of #$PR at $SHA"
+            git push -q --force-with-lease="ci-screenshots:$last" origin HEAD:ci-screenshots && break
+            [ "$attempt" != 3 ] || exit 1
+          done
+          current
           gh pr comment "$PR" --edit-last --create-if-none --body-file ../comment.md
