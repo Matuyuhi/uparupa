@@ -2,7 +2,7 @@
 
 A homemade terminal emulator for macOS only. Written in Swift (AppKit) and Zig. Terminal emulation itself is left to libghostty-vt (stable C ABI). The goal is to be usable for daily work.
 
-Progress, remaining work, and unconfirmed items are tracked in GitHub Issues (labels `feature`, `investigation`, `needs-mac`, `design`, and `M5` / `M6` for the design stage; the release an item goes into is its GitHub milestone, see "Version and release"). Read the related issue before starting, link a PR to it with `Closes #N`, and open an issue for new remaining work or unconfirmed items instead of writing them in a file. The approved screen design (A3) is #22. The design notes up to 2026-11-27 are `docs/handoff.md` at commit e9c7a16 in the history.
+Progress, remaining work, and unconfirmed items are tracked in GitHub Issues (labels `feature`, `bug`, `investigation`, `needs-mac`, `design`, and `M5` / `M6` for the design stage; the release an item goes into is its GitHub milestone, see "Version and release"). Read the related issue before starting, link a PR to it with `Closes #N`, and open an issue for new remaining work or unconfirmed items instead of writing them in a file. The approved screen design (A3) is #22. The design notes up to 2026-11-27 are `docs/handoff.md` at commit e9c7a16 in the history.
 
 ## Decided
 
@@ -54,7 +54,7 @@ Do not proceed by just piling on code. Avoid increasing the amount of code itsel
 - Releases are planned with GitHub milestones. There is one open milestone, named after the version on `main` (such as `0.4.0`), and it holds the issues and pull requests that change the app for that release. Put an item in it when opening it or when deciding it goes in the next release. Work for later has no milestone. Changes that users do not see (CI, docs, investigations) need none and can merge at any time.
 - When the open milestone is a patch version and gets an item that needs minor (or major), run `gh workflow run bump-version.yml -f part=minor` (or `major`). It renames the milestone to the new version. After a release, it closes that version's milestone and opens the next one.
 - Merge order inside a milestone: pull requests that change CI or the rules first, then the app's, one at a time when they touch the same files, updating the next one to the latest `main` after each merge.
-- Release when the milestone has nothing open and `test` passes on `main`. The Claude session that closes the milestone's last item proposes it, and runs `release.yml` once the user says OK, because a release cannot be taken back. `release.yml` stops if no milestone has the version's name or it still has open items.
+- Release when the milestone has nothing open and `test` passes on `main`. The Claude session that closes the milestone's last item proposes it, and runs `release.yml` once the user says OK, because a release cannot be taken back. `release.yml` stops if no milestone has the version's name, it still has open items, or it is a patch version that ships an item without `bug`.
 - Install is via `install.sh` (`curl ... | sh`). It places `~/Applications/upaa.app` and `~/.local/bin/upaa`. The contents of the `upaa` command come from `scripts/upaa-launcher.sh`.
 - The update check at startup is `Sources/UpaaKit/App/UpdateCheck.swift`. It queries GitHub once a day. It only notifies; it does not update.
 
