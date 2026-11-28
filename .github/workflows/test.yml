@@ -412,7 +412,10 @@ jobs:
           # and a screen when over 0.05% of its pixels changed, which leaves out the mascot's gills swaying between poses.
           changed= unchanged= all=
           while IFS='|' read -r name label; do
-            [ -f "shots/$name.png" ] || continue
+            if [ ! -f "shots/$name.png" ]; then
+              [ ! -f "main/$name.png" ] || changed="$changed### $label: not taken, though main has it"$'\n\n'
+              continue
+            fi
             all="$all$label: ![$name]($url/$name.png)"$'\n\n'
             [ -n "$main" ] || continue
             if [ ! -f "main/$name.png" ]; then
