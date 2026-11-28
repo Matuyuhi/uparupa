@@ -59,9 +59,14 @@ jobs:
             ~/.cache/zig
             .zig-cache
             .build
-          # fetch-zig.sh pins the Zig version, so a new Zig saves a cache of its own.
-          key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**', 'scripts/fetch-zig.sh') }}
-          restore-keys: build-${{ runner.os }}-
+          # fetch-zig.sh pins the Zig version, so a new Zig starts a cache of its own and never restores another Zig's.
+          key: build-${{ runner.os }}-${{ hashFiles('scripts/fetch-zig.sh') }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**') }}
+          restore-keys: build-${{ runner.os }}-${{ hashFiles('scripts/fetch-zig.sh') }}-
+
+      # SwiftPM rebuilds every file whose modification time changed, and checkout gives each file a new one.
+      # Take the time from the file's contents instead, so the restored .build is reused for the files that did not change.
+      - name: Give Swift sources times from their contents
+        run: git ls-files -s Sources Package.swift | while read -r _ blob _ path; do touch -t "$(date -r $((0x${blob:0:7})) +%Y%m%d%H%M.%S)" "$path"; done
 
       - name: Install Metal Toolchain
         run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
