@@ -20,7 +20,7 @@ final class ChangesPanel: NSView {
         var diff: [Substring]
     }
 
-    /// After each read: the branch, nil outside a git repository, and how many files have changed.
+    /// After each read: the branch (nil outside a git repository or on a detached HEAD), and how many files have changed.
     var onUpdate: ((_ branch: String?, _ changes: Int) -> Void)?
 
     private var state: State?
@@ -119,10 +119,10 @@ final class ChangesPanel: NSView {
             var views: [NSView] = [Chrome.label(file.path, size: 12, weight: selected ? .medium : .regular, mono: true)]
             views.append(NSView())
             if file.isNew {
-                views.append(Chrome.label(String(localized: "New"), size: 11, color: .systemGreen))
+                views.append(Chrome.label(String(localized: "New"), size: 11, color: Chrome.added))
             }
-            if let added = file.added { views.append(Chrome.label("+\(added)", size: 11, mono: true, color: .systemGreen)) }
-            if let removed = file.removed { views.append(Chrome.label("−\(removed)", size: 11, mono: true, color: .systemRed)) }
+            if let added = file.added { views.append(Chrome.label("+\(added)", size: 11, mono: true, color: Chrome.added)) }
+            if let removed = file.removed { views.append(Chrome.label("−\(removed)", size: 11, mono: true, color: Chrome.removed)) }
             let row = Clickable(cornerRadius: 9, selected: selected, views, spacing: 6,
                                 padding: NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8))
             row.onClick = { [weak self] in self?.select(file.path) }
@@ -148,11 +148,28 @@ final class ChangesPanel: NSView {
         if let previous = rows.arrangedSubviews.dropLast().last { rows.setCustomSpacing(top, after: previous) }
     }
 
-    /// One line of the diff. A line wider than the panel wraps, as the panel is too narrow to scroll sideways through.
+    /// One line of the diff, 17 high as in the design. A line wider than the panel wraps, as the panel is too narrow to
+    /// scroll sideways through, and goes on under its text: past the +, - or space in front and its own indentation, up
+    /// to a third of the narrowest panel, so a deep one still leaves room for the text.
     private static func diffLine(_ line: Substring) -> NSView {
-        let label = WrappingLabel(wrappingLabelWithString: String(line))
-        label.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        label.textColor = line.hasPrefix("@@") ? .secondaryLabelColor : .labelColor
+        let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        let lead = line.hasPrefix("@@") ? "" : line.prefix(1) + line.dropFirst().prefix { $0 == " " || $0 == "\t" }
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = 17
+        style.maximumLineHeight = 17
+        style.headIndent = min(NSAttributedString(string: String(lead), attributes: [.font: font]).size().width,
+                               Chrome.sidePanelWidth / 3)
+        let label = WrappingLabel(wrappingLabelWithString: "")
+        // The extra height of a line goes above its text, so the text moves up by half of it to sit in the middle.
+        let text = NSMutableAttributedString(string: String(line), attributes: [
+            .font: font, .paragraphStyle: style, .baselineOffset: (17 - font.ascender + font.descender) / 2,
+            .foregroundColor: line.hasPrefix("@@") ? NSColor.secondaryLabelColor : .labelColor,
+        ])
+        if line.hasPrefix("+") || line.hasPrefix("-") {
+            text.addAttribute(.foregroundColor, value: line.hasPrefix("+") ? Chrome.added : Chrome.removed,
+                              range: NSRange(location: 0, length: 1))
+        }
+        label.attributedStringValue = text
         label.isSelectable = false
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let fill = Fill(line.hasPrefix("+") ? Chrome.addedLine : line.hasPrefix("-") ? Chrome.removedLine : .clear)
@@ -161,8 +178,8 @@ final class ChangesPanel: NSView {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: fill.leadingAnchor, constant: 10),
             label.trailingAnchor.constraint(equalTo: fill.trailingAnchor, constant: -10),
-            label.topAnchor.constraint(equalTo: fill.topAnchor, constant: 1),
-            label.bottomAnchor.constraint(equalTo: fill.bottomAnchor, constant: -1),
+            label.topAnchor.constraint(equalTo: fill.topAnchor),
+            label.bottomAnchor.constraint(equalTo: fill.bottomAnchor),
         ])
         return fill
     }
@@ -173,7 +190,9 @@ final class ChangesPanel: NSView {
         guard let root = git(["rev-parse", "--show-toplevel"], in: directory)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !root.isEmpty
         else { return nil }
-        let branch = git(["rev-parse", "--abbrev-ref", "HEAD"], in: root)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty on a detached HEAD, which then shows no branch. A repository with no commit yet still has its branch.
+        let branch = (git(["branch", "--show-current"], in: root)?.trimmingCharacters(in: .whitespacesAndNewlines))
+            .flatMap { $0.isEmpty ? nil : $0 }
         // A repository with no commit yet has no HEAD, so only its new files show.
         var files = (git(["diff", "HEAD", "--numstat"], in: root) ?? "").split(separator: "\n").compactMap { line -> File? in
             let parts = line.split(separator: "\t", maxSplits: 2)

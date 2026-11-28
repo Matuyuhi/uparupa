@@ -7,7 +7,7 @@ Progress, remaining work, and unconfirmed items are tracked in GitHub Issues (la
 ## Decided
 
 - Target is macOS 13 or later on Apple Silicon (arm64) only. No cross-platform support.
-- The language is a mix of Swift and Zig. UI, IME, and Metal calls are in Swift. The rest of the core (PTY, libghostty-vt calls, building drawing data, glyph cache) is in Zig. Zig is 0.17.x.
+- The language is a mix of Swift and Zig. UI, IME, and Metal calls are in Swift. The rest of the core (PTY, libghostty-vt calls, building drawing data, glyph cache) is in Zig. Zig is 0.17.x. CI and releases build with the exact version that `scripts/fetch-zig.sh` fetches.
 - Zig was chosen because the user wants to write in it. If the mix costs noticeable performance or effort, say so plainly; the fallback is a core in C.
 - Build uses SwiftPM and `scripts/build-app.sh` (`zig build` → `swift build` → `build/upaa.app`).
 - The prebuilt libghostty-vt XCFramework is fetched by `scripts/fetch-ghostty-vt.sh`. It is not included in the repository.
@@ -39,6 +39,13 @@ Do not proceed by just piling on code. Avoid increasing the amount of code itsel
 - Remove code that is no longer needed because the premise changed, in the same change.
 - Reports of changes state how many lines were added and how many were removed.
 
+## Pull requests and merging
+
+- The title is in Japanese, and the description is short, plain English.
+- Every push to a pull request that is not a draft gets a Claude review (`.github/workflows/review.yml`, guidelines in `.github/review.md`). It ends with a verdict and puts the label `ready-to-merge` or `needs-human` on the pull request.
+- Claude merges its own pull request without asking when all of these hold: on the latest commit the `review` workflow finished and `test` passed, the label `ready-to-merge` was put there by the review workflow (never by hand), and the user has asked for nothing on it that is still open. This is the one exception to asking before publishing (see "Rules to follow"). Then it checks that `test` passes on `main`.
+- Otherwise the user decides. Ask with the reasons from the verdict. Fix findings and push, so the review runs again, rather than asking about them.
+
 ## Version and release
 
 - The version is written only in `.version` of `build.zig.zon`. Zig code, Swift (`upaa --version`, update check), and the `.app`'s `Info.plist` take it from there. Do not write the number anywhere else.
@@ -52,3 +59,29 @@ Do not proceed by just piling on code. Avoid increasing the amount of code itsel
 - In reports, separate confirmed facts from guesses. Do not write that something "works" if it was not run.
 - For operations involving external downloads, publishing, deletion, or overwriting, show the target and impact and get the user's confirmation before doing them.
 - Do not have the user enter credentials such as private keys or tokens.
+
+## Status labels and waiting for CI
+
+Each open pull request, and each open issue that is worked on without a pull request, has one `status:` label, so its state shows in the list without reading the thread. An open issue with none is not started.
+
+- `status: in-progress`: being written or fixed.
+- `status: wait-review`: waiting for CI or the Claude review.
+- `status: wait-owner`: waiting for the user (a choice, a check on the Mac, or an OK to merge). The last comment says what.
+- `status: blocked`: waiting on something else, such as another pull request. The last comment says what.
+
+- While a pull request is open, the label is on it, not on its issue. Closed items need no change.
+- Change the label in the same step that changes the state. Use `gh api repos/Matuyuhi/upaa/issues/<N>/labels` (POST to add, DELETE `.../labels/<name>` to remove); a tool that sets the whole list must keep the other labels.
+- All open items by state, in one command:
+
+  ```
+  gh api --paginate 'repos/Matuyuhi/upaa/issues?state=open&per_page=100' --jq '.[] | "\([.labels[].name|select(startswith("status: "))][0] // "not started")\t#\(.number) \(if .pull_request then "PR" else "issue" end) \(.title)"' | sort
+  ```
+
+- After a push, wait for CI and the review in the same turn instead of ending it. The runs take a few seconds to appear; run the command again if it times out. Then check that each run's conclusion is `success`; a draft's review is `skipped`.
+
+  ```
+  sha=$(git rev-parse HEAD); sleep 30; while gh run list -c "$sha" --json status --jq '.[].status' | grep -qv completed; do sleep 20; done; gh run list -c "$sha"
+  ```
+
+  `gh pr checks <N> --watch` does the same on the Mac, but not in Claude Code cloud sessions, which have no GitHub GraphQL.
+- If a run fails, read it (`gh run view <id> --log-failed`), fix the cause, push, and wait again. Ask the user only when the fix needs them.

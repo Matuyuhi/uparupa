@@ -25,9 +25,20 @@ window_height: u16 = 24,
 foreground: ?vt.GhosttyColorRgb = null,
 background: ?vt.GhosttyColorRgb = null,
 palette: [256]?vt.GhosttyColorRgb = @splat(null),
-/// The lines that could not be read, one per line, as many as fit. NUL-terminated ASCII, empty if every line was read.
-/// The last byte is never written.
-problems: [1024]u8 = @splat(0),
+/// The lines that could not be read, as many as fit. The Swift side words them, in the user's language.
+problems: [32]Problem = undefined,
+problem_count: u8 = 0,
+
+/// A line that could not be read. Same layout as UpaaConfigProblem in Sources/CUpaaCore.
+pub const Problem = extern struct {
+    line: u32,
+    /// Where the line's key is in the text passed to parse, in bytes. Empty for not_key_value.
+    key_start: u32,
+    key_len: u32,
+    kind: Kind,
+
+    pub const Kind = enum(u8) { not_key_value = 0, unknown_key = 1, invalid_value = 2 };
+};
 
 /// What the Swift side reads. Same layout as UpaaConfigValues in Sources/CUpaaCore. The pointers live as long as the Config.
 pub const Values = extern struct {
@@ -36,8 +47,9 @@ pub const Values = extern struct {
     background_opacity: f64,
     window_width: u16,
     window_height: u16,
-    /// The lines that could not be read, one per line, or null.
-    problems: ?[*:0]const u8,
+    /// The lines that could not be read.
+    problems: [*]const Problem,
+    problem_count: usize,
 };
 
 pub fn parse(text: []const u8) Config {
@@ -49,15 +61,15 @@ pub fn parse(text: []const u8) Config {
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0 or line[0] == '#') continue;
         const eq = std.mem.indexOfScalar(u8, line, '=') orelse {
-            config.fail(number, "expected key = value");
+            config.fail(number, .not_key_value, 0, 0);
             continue;
         };
         const key = std.mem.trim(u8, line[0..eq], " \t");
         const value = unquote(std.mem.trim(u8, line[eq + 1 ..], " \t"));
         config.set(key, value) catch |err| config.fail(number, switch (err) {
-            error.UnknownKey => "unknown key",
-            error.InvalidValue => "invalid value",
-        });
+            error.UnknownKey => .unknown_key,
+            error.InvalidValue => .invalid_value,
+        }, @intFromPtr(key.ptr) - @intFromPtr(text.ptr), key.len);
     }
     return config;
 }
@@ -69,7 +81,8 @@ pub fn values(config: *const Config) Values {
         .background_opacity = config.background_opacity,
         .window_width = config.window_width,
         .window_height = config.window_height,
-        .problems = if (config.problems[0] == 0) null else config.problems[0 .. config.problems.len - 1 :0].ptr,
+        .problems = &config.problems,
+        .problem_count = config.problem_count,
     };
 }
 
@@ -169,13 +182,15 @@ fn unquote(value: []const u8) []const u8 {
     return if (value.len >= 2 and value[0] == '"' and value[value.len - 1] == '"') value[1 .. value.len - 1] else value;
 }
 
-fn fail(config: *Config, line: usize, reason: []const u8) void {
-    const end = std.mem.indexOfScalar(u8, &config.problems, 0).?;
-    const start = if (end == 0) 0 else end + 1;
-    if (start >= config.problems.len - 1) return;
-    const out = config.problems[start .. config.problems.len - 1];
-    _ = std.fmt.bufPrint(out, "config line {d}: {s}", .{ line, reason }) catch return @memset(out, 0);
-    if (end != 0) config.problems[end] = '\n';
+fn fail(config: *Config, line: usize, kind: Problem.Kind, key_start: usize, key_len: usize) void {
+    if (config.problem_count == config.problems.len) return;
+    config.problems[config.problem_count] = .{
+        .line = std.math.lossyCast(u32, line),
+        .key_start = std.math.lossyCast(u32, key_start),
+        .key_len = std.math.lossyCast(u32, key_len),
+        .kind = kind,
+    };
+    config.problem_count += 1;
 }
 
 fn fixed(comptime text: []const u8) [513]u8 {
@@ -192,11 +207,11 @@ test "defaults" {
     try std.testing.expectEqual(@as(f64, 0.8), v.background_opacity);
     try std.testing.expectEqual(@as(u16, 80), v.window_width);
     try std.testing.expectEqual(@as(u16, 24), v.window_height);
-    try std.testing.expect(v.problems == null);
+    try std.testing.expectEqual(@as(usize, 0), v.problem_count);
 }
 
 test "settings, and the lines that cannot be read" {
-    const config = parse(
+    const text =
         \\# comment
         \\font-family = "JetBrains Mono"
         \\font-size = 14.5
@@ -208,7 +223,8 @@ test "settings, and the lines that cannot be read" {
         \\palette = 1 = #ff0000
         \\bogus = 1
         \\font-size = huge
-    );
+    ;
+    const config = parse(text);
     const v = config.values();
     try std.testing.expectEqualStrings("JetBrains Mono", std.mem.span(v.font_family));
     try std.testing.expectEqual(@as(f64, 14.5), v.font_size);
@@ -218,19 +234,25 @@ test "settings, and the lines that cannot be read" {
     try std.testing.expectEqual(vt.GhosttyColorRgb{ .r = 0x1e, .g = 0x1e, .b = 0x2e }, config.background.?);
     try std.testing.expectEqual(vt.GhosttyColorRgb{ .r = 0xff, .g = 0, .b = 0 }, config.palette[1].?);
     try std.testing.expect(config.palette[2] == null);
-    try std.testing.expectEqualStrings("config line 10: unknown key\nconfig line 11: invalid value", std.mem.span(v.problems.?));
+    try std.testing.expectEqualSlices(Problem, &.{
+        .{ .line = 10, .key_start = @intCast(std.mem.indexOf(u8, text, "bogus").?), .key_len = 5, .kind = .unknown_key },
+        .{ .line = 11, .key_start = @intCast(std.mem.lastIndexOf(u8, text, "font-size").?), .key_len = 9, .kind = .invalid_value },
+    }, v.problems[0..v.problem_count]);
 
     const bad = parse("window-width = 3\nwindow-width = 120\nno equals sign");
     try std.testing.expectEqual(@as(u16, 120), bad.window_width);
-    try std.testing.expectEqualStrings("config line 1: invalid value\nconfig line 3: expected key = value", std.mem.span(bad.values().problems.?));
+    const b = bad.values();
+    try std.testing.expectEqualSlices(Problem, &.{
+        .{ .line = 1, .key_start = 0, .key_len = 12, .kind = .invalid_value },
+        .{ .line = 3, .key_start = 0, .key_len = 0, .kind = .not_key_value },
+    }, b.problems[0..b.problem_count]);
 
-    // Lines past what fits are left out, and no line is cut.
-    var text: [200]u8 = undefined;
-    for (&text, 0..) |*byte, i| byte.* = if (i % 2 == 0) 'x' else '\n';
-    const many = parse(&text);
-    const listed = std.mem.span(many.values().problems.?);
-    try std.testing.expect(std.mem.endsWith(u8, listed, ": expected key = value"));
-    try std.testing.expect(listed.len < many.problems.len);
+    // Lines past what fits are left out.
+    var lines: [200]u8 = undefined;
+    for (&lines, 0..) |*byte, i| byte.* = if (i % 2 == 0) 'x' else '\n';
+    const many = parse(&lines);
+    try std.testing.expectEqual(@as(usize, 32), many.values().problem_count);
+    try std.testing.expectEqual(Problem{ .line = 32, .key_start = 0, .key_len = 0, .kind = .not_key_value }, many.problems[31]);
 }
 
 test "each font-family line after the first adds a fallback, and an empty one starts again" {

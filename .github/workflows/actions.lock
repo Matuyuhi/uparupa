@@ -16,6 +16,7 @@ workflows:
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
         - 'actions/upload-artifact@v7.0.2'
+    '.github/workflows/upstream-check.yml': []
 dependencies:
     'actions/attest-build-provenance@v4.2.2':
         ref: 'v4.2.2'

@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run still going for its earlier commit. Other runs are never cancelled.
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   # Check that the actions still use the commits pinned in actions.lock.
   # When adding or upgrading an action, run gh actions-lock locally and commit the lockfile.
@@ -36,13 +41,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      # Do not fetch again unless the fetch script (which pins the version and SHA-256) changes.
-      - name: libghostty-vt cache
-        id: ghostty-vt
+      # libghostty-vt and Zig. Do not fetch again unless a fetch script (which pins the version) changes.
+      - name: Fetched dependencies cache
+        id: vendor
         uses: actions/cache@v6.1.0
         with:
-          path: vendor/ghostty-vt
-          key: ghostty-vt-${{ hashFiles('scripts/fetch-ghostty-vt.sh') }}
+          path: |
+            vendor/ghostty-vt
+            vendor/zig
+          key: vendor-${{ hashFiles('scripts/fetch-ghostty-vt.sh', 'scripts/fetch-zig.sh') }}
 
       # Intermediate outputs of Zig and SwiftPM. Rebuilt only for the parts whose sources changed.
       - name: Build cache
@@ -52,23 +59,22 @@ jobs:
             ~/.cache/zig
             .zig-cache
             .build
-          key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**') }}
+          # fetch-zig.sh pins the Zig version, so a new Zig saves a cache of its own.
+          key: build-${{ runner.os }}-${{ hashFiles('build.zig', 'build.zig.zon', 'Package.swift', 'core/**', 'Sources/**', 'scripts/fetch-zig.sh') }}
           restore-keys: build-${{ runner.os }}-
-
-      - name: Install Zig
-        run: |
-          brew install zig
-          # libghostty-vt 1.0.x and build.zig assume Zig 0.17.x.
-          zig version | grep -q '^0\.17\.' || { echo "Zig 0.17.x is required: $(zig version)"; exit 1; }
 
       - name: Install Metal Toolchain
         run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
 
-      - name: Fetch libghostty-vt
-        if: steps.ghostty-vt.outputs.cache-hit != 'true'
+      - name: Fetch libghostty-vt and Zig
+        if: steps.vendor.outputs.cache-hit != 'true'
         run: |
           brew install minisign
           sh scripts/fetch-ghostty-vt.sh
+          sh scripts/fetch-zig.sh
+
+      - name: Put Zig on the PATH
+        run: echo "$PWD/vendor/zig" >> "$GITHUB_PATH"
 
       - name: Test
         run: sh scripts/test.sh
@@ -97,19 +103,22 @@ jobs:
               print(id)
           }
           SWIFT
-          # A repository with changed lines wider than the right panel, for the changes shot.
+          # A repository with changed lines wider than the right panel, indented, for the changes shot.
           repo="$PWD/$dir/repo"
           git init -q "$repo"
-          printf '%s\n' 'let panel = ChangesPanel()' 'panel.refresh(directory: root)' > "$repo/Sample.swift"
+          printf '%s\n' 'func show() {' '    let panel = ChangesPanel()' '    panel.refresh(directory: root)' '}' > "$repo/Sample.swift"
           git -C "$repo" add . && git -C "$repo" -c user.name=ci -c user.email=ci@localhost commit -qm base
-          printf '%s\n' 'let panel = ChangesPanel(frame: NSRect(x: 0, y: 0, width: Chrome.sidePanelWidth, height: 400))' \
-            '// 長い行はパネルの幅で折り返し、横にスクロールしなくても最後まで読める。' 'panel.refresh(directory: root)' > "$repo/Sample.swift"
-          for name in default config top reopen find ja changes dark close close-ja; do
-            # top: no config file, with the tab list hidden (Cmd-B), so the tabs are in the toolbar, and a second tab opened there (Cmd-T).
+          printf '%s\n' 'func show() {' '    let panel = ChangesPanel(frame: NSRect(x: 0, y: 0, width: Chrome.sidePanelWidth, height: 400))' \
+            '    // 長い行はパネルの幅で折り返し、横にスクロールしなくても最後まで読める。' '    panel.refresh(directory: root)' '}' > "$repo/Sample.swift"
+          for name in default config top tabs reopen find ja changes dark close close-ja; do
+            # top: no config file, with the tab list hidden (Cmd-B), so the tabs are in the toolbar, and a second tab opened there (Cmd-T),
+            # while the first one prints a line, for its dot of new output.
+            # tabs: no config file, with a second tab (Cmd-T) running top, while the first one prints a line, for its dot of new output.
             # reopen: no config file, with a second tab (Cmd-T) moved to /usr, closed (Cmd-W) and opened again (Cmd-Shift-T).
             # find: no config file, with a line echoed and the find bar (Cmd-F) looking for a word in it.
             # changes: no config file, in the repository above, with the right panel shown (Cmd-J).
-            # ja: no config file, in Japanese, and its Settings window (Cmd-,) as well. The others are in English.
+            # ja: with the config file, in Japanese, and its Settings window (Cmd-,) as well, so the problems show in Japanese.
+            # The others are in English.
             # dark: no config file, with the runner switched to dark mode.
             # close, close-ja: no config file, in zsh with upaa's startup files, with a job left in the background and
             # Cmd-W pressed, so the sheet asking whether to close the window shows over it, in English and in Japanese.
@@ -117,8 +126,9 @@ jobs:
             lang=en
             shell="$login"
             case "$name" in close*) shell=/bin/zsh ;; esac
-            case "$name" in top | reopen | find | changes | close) conf=default ;; esac
-            if [ "$name" = ja ] || [ "$name" = close-ja ]; then conf=default; lang=ja; fi
+            case "$name" in top | tabs | reopen | find | changes | close) conf=default ;; esac
+            if [ "$name" = ja ]; then conf=config; lang=ja; fi
+            if [ "$name" = close-ja ]; then conf=default; lang=ja; fi
             if [ "$name" = dark ]; then
               conf=default
               osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true'
@@ -133,10 +143,24 @@ jobs:
             kill -0 "$pid" || { echo "upaa exited during launch ($name)"; exit 1; }
             if [ "$name" = top ]; then
               osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
+                -e 'tell application "System Events" to keystroke "(sleep 2; echo done) &"' \
+                -e 'tell application "System Events" to key code 36' \
                 -e 'tell application "System Events" to keystroke "b" using command down' \
                 -e 'delay 1' \
                 -e 'tell application "System Events" to keystroke "t" using command down' || echo "could not press Cmd-B, Cmd-T"
-              sleep 2
+              sleep 4
+            fi
+            if [ "$name" = tabs ]; then
+              osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
+                -e 'tell application "System Events" to keystroke "(sleep 2; echo done) &"' \
+                -e 'tell application "System Events" to key code 36' \
+                -e 'delay 0.5' \
+                -e 'tell application "System Events" to keystroke "t" using command down' \
+                -e 'delay 1' \
+                -e 'tell application "System Events" to keystroke "top"' \
+                -e 'tell application "System Events" to key code 36' || echo "could not press Cmd-T, run top"
+              # The tab list reads the programs every 3 seconds.
+              sleep 5
             fi
             if [ "$name" = reopen ]; then
               osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
@@ -360,10 +384,11 @@ jobs:
           printf '%s\n' "Launch screenshots for $SHA" '' \
             "Without a config file: ![default]($url/default.png)" '' \
             "With a config file: ![config]($url/config.png)" '' \
-            "Tabs along the top (Cmd-B): ![top]($url/top.png)" '' \
+            "Tabs along the top (Cmd-B), the first with new output: ![top]($url/top.png)" '' \
+            "A second tab running top, the first with new output: ![tabs]($url/tabs.png)" '' \
             "A closed tab opened again in /usr (Cmd-Shift-T): ![reopen]($url/reopen.png)" '' \
             "Find (Cmd-F): ![find]($url/find.png)" '' \
-            "In Japanese: ![ja]($url/ja.png)" '' \
+            "In Japanese, with the config file: ![ja]($url/ja.png)" '' \
             "Changes panel with lines wider than it (Cmd-J): ![changes]($url/changes.png)" '' \
             "In dark mode: ![dark]($url/dark.png)" '' \
             "Cmd-W in zsh with a job in the background: ![close]($url/close.png)" '' \
