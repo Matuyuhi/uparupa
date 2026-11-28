@@ -191,7 +191,7 @@ final class ChangesPanel: NSView {
             .trimmingCharacters(in: .whitespacesAndNewlines), !root.isEmpty
         else { return nil }
         // Empty on a detached HEAD, which then shows no branch. A repository with no commit yet still has its branch.
-        let branch = git(["branch", "--show-current"], in: root)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = (git(["branch", "--show-current"], in: root)?.trimmingCharacters(in: .whitespacesAndNewlines))
             .flatMap { $0.isEmpty ? nil : $0 }
         // A repository with no commit yet has no HEAD, so only its new files show.
         var files = (git(["diff", "HEAD", "--numstat"], in: root) ?? "").split(separator: "\n").compactMap { line -> File? in
