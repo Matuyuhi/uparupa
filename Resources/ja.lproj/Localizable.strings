@@ -47,6 +47,10 @@
 "Split Down (⇧⌘D)" = "横に分割 (⇧⌘D)";
 "Changes Panel (⌘J)" = "変更パネル (⌘J)";
 "Links Panel (⇧⌘J)" = "リンクパネル (⇧⌘J)";
+"Changes %lld" = "変更 %lld";
+"Links %lld" = "リンク %lld";
+"Right Panel" = "右パネル";
+"Show or Hide Right Panel" = "右パネルを表示・非表示";
 "Find (⌘F)" = "検索 (⌘F)";
 "Close Find" = "検索を閉じる";
 "⌘D Split · ⌘F Find · ⌘B Tabs" = "⌘D 分割 · ⌘F 検索 · ⌘B タブ一覧";
