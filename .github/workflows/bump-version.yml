@@ -7,6 +7,9 @@ name: bump-version
 # status checks"), so once both pass, their results are set on the commit as commit statuses of the same names, which
 # do, and main moves to it.
 # release.yml calls this after each release with part=patch, so main always holds the next version.
+# It also keeps one open milestone named after the version on main: it closes the milestone of the version just
+# released, or renames the open one when a minor or major bump comes before its release, then makes sure one named
+# after the new version exists.
 # Run it by hand (gh workflow run bump-version.yml -f part=minor) to move to a new minor or major version.
 on:
   workflow_dispatch:
@@ -33,6 +36,7 @@ jobs:
       contents: write
       actions: write
       statuses: write
+      issues: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -75,3 +79,14 @@ jobs:
           done
           git push origin HEAD:main
           echo "$current -> $next"
+          api="repos/$GITHUB_REPOSITORY/milestones"
+          number="$(gh api "$api?state=open&per_page=100" --jq ".[] | select(.title == \"$current\") | .number")"
+          if [ -n "$number" ]; then
+            if gh release view "v$current" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              gh api -X PATCH "$api/$number" -f state=closed --silent
+            else
+              gh api -X PATCH "$api/$number" -f title="$next" --silent
+            fi
+          fi
+          [ -n "$(gh api "$api?state=all&per_page=100" --jq ".[] | select(.title == \"$next\") | .number")" ] ||
+            gh api "$api" -f title="$next" --silent

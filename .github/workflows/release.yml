@@ -41,8 +41,28 @@ jobs:
             Leave out commits that change nothing for users (version bumps, CI, tests, refactoring).
             Return the notes alone in `notes`, with no title and no preamble. Do not change any file.
 
+  # Release only when the milestone named after the version has nothing open (see "Version and release" in CLAUDE.md).
+  milestone:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check that the milestone is done
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)"
+          open="$(gh api "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
+            --jq ".[] | select(.title == \"$version\") | .open_issues")"
+          [ -n "$open" ] || { echo "No milestone is named $version"; exit 1; }
+          [ "$open" = 0 ] || { echo "Milestone $version still has $open open issues or pull requests"; exit 1; }
+
   release:
-    needs: notes
+    needs: [notes, milestone]
     # Do not release from anything other than main.
     if: github.ref == 'refs/heads/main'
     runs-on: xcode-27
@@ -121,6 +141,7 @@ jobs:
       contents: write
       actions: write
       statuses: write
+      issues: write
     uses: ./.github/workflows/bump-version.yml
     with:
       part: patch
