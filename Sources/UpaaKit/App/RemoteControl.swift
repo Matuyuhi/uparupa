@@ -255,7 +255,8 @@ final class RemoteControl {
         guard writeAll(fd, length + payload) else {
             return fail(String(cString: strerror(errno)))
         }
-        // The answer, until the app closes the socket: the exit code (1 byte), then the text to print.
+        // The answer, until the app closes the socket: the exit code (1 byte), the text's length (4 bytes,
+        // little-endian), then the text to print. Less than that means the app gave up on it, so nothing is printed.
         var answer: [UInt8] = []
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
@@ -264,9 +265,11 @@ final class RemoteControl {
             guard n > 0 else { break }
             answer += chunk[..<n]
         }
-        guard let code = answer.first else { return fail(String(localized: "upaa did not answer.")) }
-        (code == 0 ? FileHandle.standardOutput : FileHandle.standardError).write(Data(answer.dropFirst()))
-        return Int32(code)
+        guard answer.count >= 5 else { return fail(String(localized: "upaa did not answer.")) }
+        let count = answer[1..<5].enumerated().reduce(0) { $0 | Int($1.element) << (8 * $1.offset) }
+        guard answer.count == 5 + count else { return fail(String(localized: "The answer from upaa was cut off.")) }
+        (answer[0] == 0 ? FileHandle.standardOutput : FileHandle.standardError).write(Data(answer[5...]))
+        return Int32(answer[0])
     }
 
     /// Calls body with the socket address for path, or returns nil if the path is too long for one.
@@ -329,9 +332,10 @@ private final class Connection {
         source.resume()
     }
 
-    /// Sends the exit code and the text, and closes the socket.
+    /// Sends the exit code, the text's length and the text (RemoteControl.run reads them), and closes the socket.
     func answer(_ code: UInt8, _ text: String) {
-        end(sending: [code] + Array(text.utf8))
+        let bytes = Array(text.utf8)
+        end(sending: [code] + withUnsafeBytes(of: UInt32(bytes.count).littleEndian) { Array($0) } + bytes)
     }
 
     /// The bytes are written off the main thread, since a command that is stopped (Ctrl-Z) or does not read would

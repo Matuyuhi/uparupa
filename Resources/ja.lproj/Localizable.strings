@@ -110,3 +110,4 @@
 "Run this in an upaa pane." = "upaa のペインの中で実行してください。";
 "Remote control is off. Add “remote-control = true” to %@." = "リモート操作が無効です。%@ に「remote-control = true」を書いてください。";
 "upaa did not answer." = "upaa から返事がありませんでした。";
+"The answer from upaa was cut off." = "upaa からの返事が途中で切れました。";
