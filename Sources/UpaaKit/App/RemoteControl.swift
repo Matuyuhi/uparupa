@@ -66,6 +66,9 @@ final class RemoteControl {
     private func serve(_ fd: Int32) {
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        // A command that is stopped and never goes on gives up its answer after this, instead of holding a thread.
+        var limit = timeval(tv_sec: 10, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
         var panes: [Int32: TerminalView] = [:]
         for window in windows() {
             for entry in window.panes { panes[entry.pane.session.pid] = entry.pane }
