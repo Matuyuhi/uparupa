@@ -148,13 +148,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Claude reads only this run's numbers, which the workflow wrote, and the titles of the open Issues, not what
-      # anyone can write in an Issue, so no one can steer it from there.
+      # Claude reads only this run's numbers, which the workflow wrote, and the titles of the open Issues by the owner
+      # or by bots, not what anyone else can write in an Issue, so no one else can steer it from there.
       - if: env.HAS_TOKEN == 'true'
         run: |
           mkdir -p build
           gh issue list --label measurements --state open --limit 1 --json body --jq '.[0].body' > build/measurements.md
-          gh issue list --state open --limit 300 --json number,title --jq '.[] | "#\(.number) \(.title)"' > build/open-issues.txt
+          gh issue list --state open --limit 300 --json number,title,author \
+            --jq '.[] | select(.author.login == "${{ github.repository_owner }}" or .author.is_bot) | "#\(.number) \(.title)"' > build/open-issues.txt
 
       - if: env.HAS_TOKEN == 'true'
         uses: anthropics/claude-code-action@v1.0.290
