@@ -97,12 +97,18 @@ jobs:
           printf '%s\n' 'font-family = Menlo' 'font-family = Apple Color Emoji' 'font-size = 16' 'foreground = #cdd6f4' 'background = #1e1e2e' 'window-width = 100' \
             'cursor-style = bar' 'window-height = 2' > "$dir/config/upaa/config"
           # Prints the id of the window owned by the given process, to photograph that window alone.
+          # With "wait", it first waits up to 15 seconds for the window to show, for a launch to go on as soon as it has.
           cat > "$dir/window.swift" <<'SWIFT'
           import CoreGraphics
+          import Foundation
           let pid = Int(CommandLine.arguments[1])!
-          let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-          if let id = windows.first(where: { $0["kCGWindowOwnerPID"] as? Int == pid && $0["kCGWindowLayer"] as? Int == 0 })?["kCGWindowNumber"] {
-              print(id)
+          for _ in 0..<(CommandLine.arguments.count > 2 ? 150 : 1) {
+              let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+              if let id = windows.first(where: { $0["kCGWindowOwnerPID"] as? Int == pid && $0["kCGWindowLayer"] as? Int == 0 })?["kCGWindowNumber"] {
+                  print(id)
+                  exit(0)
+              }
+              usleep(100_000)
           }
           SWIFT
           # A repository with changed lines wider than the right panel, indented, for the changes shot.
@@ -152,7 +158,8 @@ jobs:
             sudo dscl . -create "/Users/$USER" UserShell "$shell"
             SHELL="$shell" ZDOTDIR="$PWD/$dir/zsh" XDG_CONFIG_HOME="$PWD/$dir/$conf" build/upaa.app/Contents/MacOS/upaa -AppleLanguages "($lang)" &
             pid=$!
-            sleep 5
+            swift "$dir/window.swift" "$pid" wait > /dev/null
+            sleep 1
             sudo dscl . -create "/Users/$USER" UserShell "$login"
             kill -0 "$pid" || { echo "upaa exited during launch ($name)"; exit 1; }
             if [ "$name" = top ]; then
@@ -256,7 +263,8 @@ jobs:
             sudo dscl . -create "/Users/$USER" UserShell "/bin/$shell"
             SHELL="/bin/$shell" ZDOTDIR="$PWD/$dir/zsh" XDG_CONFIG_HOME="$PWD/$dir/default" build/upaa.app/Contents/MacOS/upaa -AppleLanguages '(en)' &
             pid=$!
-            sleep 5
+            swift "$dir/window.swift" "$pid" wait > /dev/null
+            sleep 1
             sudo dscl . -create "/Users/$USER" UserShell "$login"
             osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
               -e "tell application \"System Events\" to keystroke \"$typed\"" \
@@ -288,7 +296,8 @@ jobs:
           dir=build/screenshots
           XDG_CONFIG_HOME="$PWD/$dir/config" build/upaa.app/Contents/MacOS/upaa -AppleLanguages '(en)' &
           pid=$!
-          sleep 5
+          swift "$dir/window.swift" "$pid" wait > /dev/null
+          sleep 1
           osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" \
             -e 'tell application "System Events" to keystroke "," using command down' || echo "could not press Cmd-,"
           sleep 2
@@ -326,7 +335,8 @@ jobs:
             defaults write local.upaa NSQuitAlwaysKeepsWindows -bool "$keep"
             build/upaa.app/Contents/MacOS/upaa -AppleLanguages '(en)' &
             pid=$!
-            sleep 5
+            swift "$dir/window.swift" "$pid" wait > /dev/null
+            sleep 1
             app="first process whose unix id is $pid"
             osascript -e "tell application \"System Events\" to set frontmost of ($app) to true" \
               -e 'tell application "System Events" to keystroke "n" using command down' -e 'delay 1' \
@@ -341,6 +351,7 @@ jobs:
             kill -0 "$pid" 2>/dev/null && { echo "upaa did not quit on Cmd-Q"; kill "$pid"; exit 1; }
             build/upaa.app/Contents/MacOS/upaa -AppleLanguages '(en)' &
             pid=$!
+            # Restored windows can come one after another, so this keeps a fixed wait rather than going on at the first.
             sleep 5
             after="$(swift "$dir/frames.swift" "$pid")"
             kill "$pid"
