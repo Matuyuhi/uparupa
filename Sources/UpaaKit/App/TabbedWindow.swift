@@ -12,7 +12,7 @@ import AppKit
 /// Behind them all is one card of the terminal's background color, translucent over a color gradient; the terminal
 /// draws no background of its own and runs up under the toolbar, its text below it.
 /// The menu actions reach this object through the responder chain, as the window's delegate.
-final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
+final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
     private final class Tab {
         /// The terminal, or the split view that holds the tab's panes.
         var top: NSView
@@ -50,6 +50,11 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     private var hostEdges: [NSLayoutConstraint] = []
     /// Holds the selected tab's view.
     private let host = Host()
+    /// The toolbar's "Changes N" and "Links N" (design A3, section 4): the shown view's button is on, and with the
+    /// panel hidden neither is.
+    private let panelSwitch = NSSegmentedControl(
+        labels: [String(localized: "Changes \(0)"), String(localized: "Links \(0)")], trackingMode: .selectOne,
+        target: nil, action: #selector(switchPanel(_:)))
     private let sizeLabel = Chrome.label("", size: 11, mono: true, color: .secondaryLabelColor)
     /// The first of the problems, and how many more. A click opens Settings, which lists them all.
     private let problemButton = NSButton(title: "", image: NSImage(systemSymbolName: "exclamationmark.triangle.fill",
@@ -129,13 +134,12 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
             guard let self, index != self.selected else { return }
             self.select(index)
         }
+        panelSwitch.target = self
+        panelSwitch.setToolTip(String(localized: "Changes Panel (⌘J)"), forSegment: 0)
+        panelSwitch.setToolTip(String(localized: "Links Panel (⇧⌘J)"), forSegment: 1)
         changes.onUpdate = { [weak self] branch, count in
             guard let self else { return }
-            // A mark on the right panel's button that the focused pane's repository has changes (macOS 26 and later).
-            if #available(macOS 26.0, *) {
-                let item = self.window.toolbar?.items.first { $0.itemIdentifier == Self.panelButton }
-                item?.badge = count > 0 ? .count(count) : nil
-            }
+            self.panelSwitch.setLabel(String(localized: "Changes \(count)"), forSegment: 0)
             guard branch != self.branch else { return }
             self.branch = branch
             self.refresh()
@@ -323,10 +327,10 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     private static let findButton = NSToolbarItem.Identifier("find")
     private static let panelEdge = NSToolbarItem.Identifier("panelEdge")
     private static let panelButton = NSToolbarItem.Identifier("panel")
-    private static let linksButton = NSToolbarItem.Identifier("links")
+    private static let panelSwitchItem = NSToolbarItem.Identifier("panelSwitch")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.tabsEdge, .flexibleSpace, Self.splitRight, Self.splitDown, Self.findButton, Self.panelEdge, Self.panelButton, Self.linksButton]
+        [Self.tabsEdge, .flexibleSpace, Self.splitRight, Self.splitDown, Self.findButton, Self.panelEdge, Self.panelSwitchItem, Self.panelButton]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -343,8 +347,12 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         case Self.splitRight: return button(identifier, "rectangle.split.2x1", String(localized: "Split Right (⌘D)"), #selector(splitRight(_:)))
         case Self.splitDown: return button(identifier, "rectangle.split.1x2", String(localized: "Split Down (⇧⌘D)"), #selector(splitDown(_:)))
         case Self.findButton: return button(identifier, "magnifyingglass", String(localized: "Find (⌘F)"), #selector(showFindBar(_:)))
-        case Self.panelButton: return button(identifier, "sidebar.right", String(localized: "Changes Panel (⌘J)"), #selector(toggleSidePanel(_:)))
-        case Self.linksButton: return button(identifier, "link", String(localized: "Links Panel (⇧⌘J)"), #selector(toggleLinksPanel(_:)))
+        case Self.panelButton: return button(identifier, "sidebar.right", String(localized: "Right Panel"), #selector(togglePanel(_:)))
+        case Self.panelSwitchItem:
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.view = panelSwitch
+            item.label = String(localized: "Right Panel")
+            return item
         case Self.newTabButton: return button(identifier, "plus", String(localized: "New Tab (⌘T)"), #selector(newTab(_:)))
         case Self.tabsItem:
             let item = NSToolbarItem(itemIdentifier: identifier)
@@ -372,6 +380,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     /// the toolbar beside the traffic lights, in place of the window's title, the tabs widening from nothing; shown
     /// again, they fade out and go back.
     @objc private func placeTabs(_ notification: Notification) {
+        showPanelSwitch()
         guard let toolbar = window.toolbar else { return }
         let top = columns.splitViewItems[0].isCollapsed
         let shown = toolbar.items.contains { $0.itemIdentifier == Self.tabsItem }
@@ -475,6 +484,30 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         togglePanel(links: true)
     }
 
+    /// The toolbar's "Changes N" and "Links N": shows that view, or hides the panel if it shows it.
+    @objc private func switchPanel(_ sender: NSSegmentedControl) {
+        togglePanel(links: sender.selectedSegment == 1)
+    }
+
+    /// The toolbar's panel button: hides the panel, or shows it with the view it last had.
+    @objc private func togglePanel(_ sender: Any?) {
+        togglePanel(links: !links.isHidden)
+    }
+
+    /// Puts the pill on the shown view's button, or on neither with the panel hidden, its divider dragged shut too.
+    private func showPanelSwitch() {
+        panelSwitch.selectedSegment = panel.isCollapsed ? -1 : links.isHidden ? 0 : 1
+    }
+
+    /// View > Changes Panel and Links Panel have a checkmark while their view shows.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(toggleSidePanel(_:)) || item.action == #selector(toggleLinksPanel(_:)) {
+            let shown = item.action == #selector(toggleLinksPanel(_:)) ? links : changes
+            item.state = !panel.isCollapsed && !shown.isHidden ? .on : .off
+        }
+        return true
+    }
+
     private func togglePanel(links: Bool) {
         if !panel.isCollapsed, self.links.isHidden == !links {
             panel.animator().isCollapsed = true
@@ -490,6 +523,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
             changes.isHidden = links
             panel.animator().isCollapsed = false
         }
+        showPanelSwitch()
         readPanels()
     }
 
@@ -638,10 +672,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         let shown = tabs[selected].panes.flatMap(\.session.links).sorted { $0.seen < $1.seen }
             .filter { listed.insert($0.address).inserted }.reversed()
         links.show(Array(shown))
-        if #available(macOS 26.0, *) {
-            let item = window.toolbar?.items.first { $0.itemIdentifier == Self.linksButton }
-            item?.badge = shown.isEmpty ? nil : .count(shown.count)
-        }
+        panelSwitch.setLabel(String(localized: "Links \(shown.count)"), forSegment: 1)
         guard window.occlusionState.contains(.visible) else { return }
         changes.refresh(directory: tabs[selected].focus.session.cwd)
     }
