@@ -23,7 +23,7 @@ kib() { echo $(( $(stat -f%z "$1") / 1024 )); }
 
 # Build
 start=$(now)
-zig build -Doptimize=ReleaseFast
+zig build -Doptimize=ReleaseFast --summary all
 zig_done=$(now)
 CONFIG=release sh scripts/build-app.sh > /dev/null
 app_done=$(now)
@@ -78,8 +78,8 @@ quit() {
 wait_window() {
   deadline=$(( $(date +%s) + 30 ))
   until [ -n "$("$out/window" "$pid")" ]; do
-    kill -0 "$pid" || { echo "upaa exited during launch"; exit 1; }
-    [ "$(date +%s)" -lt "$deadline" ] || { echo "upaa opened no window in 30 seconds"; exit 1; }
+    kill -0 "$pid" || { echo "the app exited during launch" >&2; exit 1; }
+    [ "$(date +%s)" -lt "$deadline" ] || { echo "the app opened no window in 30 seconds" >&2; exit 1; }
     sleep 0.02
   done
 }
