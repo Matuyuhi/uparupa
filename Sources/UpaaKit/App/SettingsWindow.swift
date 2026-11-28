@@ -7,15 +7,21 @@ final class SettingsWindow: NSWindowController {
     private let sizeStepper = NSStepper()
     /// One row per fallback, each a menu of every family and a button that removes the row.
     private let fallbacks = NSStackView()
+    private let mascotBox = NSButton(
+        checkboxWithTitle: String(localized: "Show the axolotl behind the text"), target: nil, action: nil)
     /// What in the config could not be used, under the note. Its row is hidden when there is none.
     private let problems = NSTextField(wrappingLabelWithString: "")
     private var grid: NSGridView!
     private let families = NSFontManager.shared.availableFontFamilies
-    private let onChange: (_ families: [String], _ size: Double) -> Void
+    private let onFont: (_ families: [String], _ size: Double) -> Void
+    private let onMascot: (Bool) -> Void
 
-    /// families is the font, then its fallbacks. onChange gets them back, with the size in points, after each change.
-    init(families: [String], size: Double, problems: [String], onChange: @escaping (_ families: [String], _ size: Double) -> Void) {
-        self.onChange = onChange
+    /// families is the font, then its fallbacks. onFont gets them back, with the size in points, after each change of
+    /// them, and onMascot whether the mascot is shown, after each change of that.
+    init(families: [String], size: Double, mascot: Bool, problems: [String],
+         onFont: @escaping (_ families: [String], _ size: Double) -> Void, onMascot: @escaping (Bool) -> Void) {
+        self.onFont = onFont
+        self.onMascot = onMascot
         let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: true)
         window.title = String(localized: "Settings")
         window.isReleasedWhenClosed = false
@@ -48,6 +54,8 @@ final class SettingsWindow: NSWindowController {
             control.target = self
             control.action = #selector(changed(_:))
         }
+        mascotBox.target = self
+        mascotBox.action = #selector(mascotChanged(_:))
 
         fallbacks.orientation = .vertical
         fallbacks.alignment = .leading
@@ -79,12 +87,14 @@ final class SettingsWindow: NSWindowController {
             [NSTextField(labelWithString: String(localized: "Size:")), sizeRow],
             [NSTextField(labelWithString: String(localized: "Fallbacks:")), fallbackColumn],
             [NSGridCell.emptyContentView, note],
+            [NSTextField(labelWithString: String(localized: "Mascot:")), mascotBox],
             [NSGridCell.emptyContentView, self.problems],
         ])
         grid.rowAlignment = .firstBaseline
         grid.column(at: 0).xPlacement = .trailing
         grid.rowSpacing = 10
         grid.row(at: 3).topPadding = 4
+        grid.row(at: 4).topPadding = 8
         grid.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView()
@@ -102,7 +112,7 @@ final class SettingsWindow: NSWindowController {
         window.contentView = content
         // Not the size field, which would open with its text selected.
         window.initialFirstResponder = fontButton
-        show(families: families, size: size, problems: problems)
+        show(families: families, size: size, mascot: mascot, problems: problems)
         window.center()
     }
 
@@ -111,10 +121,11 @@ final class SettingsWindow: NSWindowController {
         fatalError("init(coder:) is not used")
     }
 
-    /// Shows the font, its fallbacks, the size and what could not be used, as when the config file was changed by hand.
-    func show(families: [String], size: Double, problems: [String]) {
+    /// Shows the settings and what could not be used, as when the config file was changed by hand.
+    func show(families: [String], size: Double, mascot: Bool, problems: [String]) {
         self.problems.stringValue = problems.joined(separator: "\n")
-        grid.row(at: 4).isHidden = problems.isEmpty
+        grid.row(at: 5).isHidden = problems.isEmpty
+        mascotBox.state = mascot ? .on : .off
         Self.select(families.first, in: fontButton)
         sizeField.doubleValue = size
         sizeStepper.doubleValue = size
@@ -171,6 +182,10 @@ final class SettingsWindow: NSWindowController {
         if sender === sizeStepper { sizeField.doubleValue = sizeStepper.doubleValue } else { sizeStepper.doubleValue = sizeField.doubleValue }
         guard let font = fontButton.titleOfSelectedItem else { return }
         let chosen = fallbacks.arrangedSubviews.compactMap { ($0 as? NSStackView)?.arrangedSubviews.first as? NSPopUpButton }
-        onChange([font] + chosen.compactMap(\.titleOfSelectedItem), sizeField.doubleValue)
+        onFont([font] + chosen.compactMap(\.titleOfSelectedItem), sizeField.doubleValue)
+    }
+
+    @objc private func mascotChanged(_ sender: NSButton) {
+        onMascot(sender.state == .on)
     }
 }

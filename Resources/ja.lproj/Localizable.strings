@@ -90,6 +90,8 @@
 "Fallbacks:" = "フォールバック:";
 "Add" = "追加";
 "Remove" = "削除";
+"Mascot:" = "マスコット:";
+"Show the axolotl behind the text" = "文字の後ろにウーパールーパーを表示";
 "Characters the font lacks (such as Nerd Font icons) are drawn with the first fallback that has them, from the top. Saved in: %@" = "フォントにない文字（Nerd Font のアイコンなど）は、フォールバックを上から順に探して描きます。保存先: %@";
 
 /* Update check */

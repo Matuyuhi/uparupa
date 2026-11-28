@@ -18,6 +18,8 @@ const note_color = [4]u8{ 233, 111, 146, 255 };
 
 /// When the greeting started (milliseconds on the monotonic clock).
 greeted_ms: u64,
+/// When something last happened in the pane (output, a key, a click). The idle loop stops rest_after_ms later.
+woke_ms: u64,
 
 /// One cell of a picture: the braille dots that are set (the low byte of U+28xx, 0 for none) and their color.
 const Dot = struct { bits: u8 = 0, color: [3]u8 = .{ 0, 0, 0 } };
@@ -51,9 +53,23 @@ const idle = [_]Step{
     .{ .pose = .closed, .ms = 600 },
 };
 
+/// After this long with nothing happening, the idle loop stops at the end of a loop, and the picture rests with its
+/// mouth closed until something happens, so nothing is drawn meanwhile.
+const rest_after_ms = 30_000;
+
+pub fn init(now_ms: u64) Mascot {
+    return .{ .greeted_ms = now_ms, .woke_ms = now_ms };
+}
+
+/// Something happened in the pane: the idle loop goes on (again) for rest_after_ms.
+pub fn wake(m: *Mascot, now_ms: u64) void {
+    m.woke_ms = now_ms;
+}
+
 /// Plays the greeting again, starting with the mouth opening.
 pub fn poke(m: *Mascot, now_ms: u64) void {
     m.greeted_ms = now_ms -| greeting[0].ms;
+    m.woke_ms = now_ms;
 }
 
 /// Whether the cell (col, row) is inside the picture on a cols x rows screen.
@@ -62,9 +78,9 @@ pub fn covers(cols: u16, rows: u16, col: i32, row: i32) bool {
     return col >= top.col and col < top.col + width and row >= top.row and row < rows;
 }
 
-/// Draws the picture for now_ms into the blank cells of a whole screen (cols x rows cells, row by row), and the note
-/// on the row above it. Returns the milliseconds until the picture changes, or 0 if none of it is visible.
-pub fn draw(m: Mascot, cells: []Cell, cols: u16, rows: u16, background: [4]u8, note: []const u8, face: Face, atlas: *Atlas, now_ms: u64) u32 {
+/// Draws the picture for now_ms into the blank cells of a whole screen (cols x rows cells, row by row).
+/// Returns the milliseconds until the picture changes, or 0 if it rests or none of it is visible.
+pub fn draw(m: Mascot, cells: []Cell, cols: u16, rows: u16, background: [4]u8, face: Face, atlas: *Atlas, now_ms: u64) u32 {
     const current = m.shown(now_ms);
     const top = origin(cols, rows);
     var visible = false;
@@ -80,20 +96,23 @@ pub fn draw(m: Mascot, cells: []Cell, cols: u16, rows: u16, background: [4]u8, n
             visible = true;
         }
     }
-
-    // The note ends where the picture ends. It is ASCII (UpdateCheck.swift), so one byte is one cell.
-    const note_row = top.row - 1;
-    if (note_row >= 0) {
-        const start = top.col + width - @as(i32, @intCast(note.len));
-        for (note, 0..) |ch, i| {
-            const col = start + @as(i32, @intCast(i));
-            if (col < 0 or col >= cols) continue;
-            const cell = blank(cells, cols, @intCast(col), @intCast(note_row), background) orelse continue;
-            cell.glyph = atlas.get(face, &.{ch});
-            cell.fg = note_color;
-        }
-    }
     return if (visible) current.next_ms else 0;
+}
+
+/// Draws the note into the blank cells of the row above the picture, also when the mascot is off, since the note is
+/// how an update is told. It ends where the picture ends. It is ASCII (UpdateCheck.swift), so one byte is one cell.
+pub fn drawNote(cells: []Cell, cols: u16, rows: u16, background: [4]u8, note: []const u8, face: Face, atlas: *Atlas) void {
+    const top = origin(cols, rows);
+    const note_row = top.row - 1;
+    if (note_row < 0) return;
+    const start = top.col + width - @as(i32, @intCast(note.len));
+    for (note, 0..) |ch, i| {
+        const col = start + @as(i32, @intCast(i));
+        if (col < 0 or col >= cols) continue;
+        const cell = blank(cells, cols, @intCast(col), @intCast(note_row), background) orelse continue;
+        cell.glyph = atlas.get(face, &.{ch});
+        cell.fg = note_color;
+    }
 }
 
 fn origin(cols: u16, rows: u16) struct { col: i32, row: i32 } {
@@ -105,7 +124,12 @@ const Shown = struct { picture: *const Picture, next_ms: u32 };
 fn shown(m: Mascot, now_ms: u64) Shown {
     const t = now_ms -| m.greeted_ms;
     if (t < total(&greeting)) return at(&greeting, t);
-    return at(&idle, (t - total(&greeting)) % total(&idle));
+    const idle_t = t - total(&greeting);
+    // Whole loops, counted from the end of the greeting, until rest_after_ms past the last wake.
+    const awake_ms = (m.woke_ms + rest_after_ms) -| (m.greeted_ms + total(&greeting));
+    const loops = (awake_ms + total(&idle) - 1) / total(&idle);
+    if (idle_t >= loops * total(&idle)) return .{ .picture = &pictures[@intFromEnum(Pose.closed)], .next_ms = 0 };
+    return at(&idle, idle_t % total(&idle));
 }
 
 fn at(steps: []const Step, t: u64) Shown {
@@ -199,7 +223,7 @@ test "the pictures differ by pose" {
 }
 
 test "greets, then idles, and greets again when poked" {
-    var m: Mascot = .{ .greeted_ms = 10_000 };
+    var m: Mascot = .init(10_000);
     try std.testing.expectEqual(Shown{ .picture = &pictures[@intFromEnum(Pose.closed)], .next_ms = 600 }, m.shown(10_000));
     try std.testing.expectEqual(Shown{ .picture = &pictures[@intFromEnum(Pose.half)], .next_ms = 10 }, m.shown(10_650));
     const idle_start = 10_000 + total(&greeting);
@@ -208,6 +232,23 @@ test "greets, then idles, and greets again when poked" {
 
     m.poke(20_000);
     try std.testing.expectEqual(&pictures[@intFromEnum(Pose.half)], m.shown(20_000).picture);
+}
+
+test "rests with the mouth closed at the end of a loop when nothing happens, and idles again when woken" {
+    var m: Mascot = .init(0);
+    const loop = total(&idle);
+    const idle_start = total(&greeting);
+    // The loop that is playing when rest_after_ms passes is played to its end.
+    const rest_at = idle_start + (rest_after_ms - idle_start + loop - 1) / loop * loop;
+    try std.testing.expect(m.shown(rest_at - 1).next_ms > 0);
+    const rest: Shown = .{ .picture = &pictures[@intFromEnum(Pose.closed)], .next_ms = 0 };
+    try std.testing.expectEqual(rest, m.shown(rest_at));
+    try std.testing.expectEqual(rest, m.shown(rest_at + 600_000));
+
+    m.wake(rest_at + 600_000);
+    try std.testing.expect(m.shown(rest_at + 600_000).next_ms > 0);
+    try std.testing.expect(m.shown(rest_at + 600_000 + rest_after_ms - 1).next_ms > 0);
+    try std.testing.expectEqual(rest, m.shown(rest_at + 600_000 + rest_after_ms + loop));
 }
 
 test "drawn only into blank cells, at the bottom right, with the note above" {
@@ -223,7 +264,7 @@ test "drawn only into blank cells, at the bottom right, with the note above" {
     for (&cells, 0..) |*cell, i| cell.* = .{ .col = @intCast(i % cols), .row = @intCast(i / cols), .glyph = .{}, .fg = .{ 255, 255, 255, 255 }, .bg = bg };
 
     // A cell of the picture that has dots, with text already in it.
-    const m: Mascot = .{ .greeted_ms = 0 };
+    const m: Mascot = .init(0);
     const picture = m.shown(0).picture;
     const top = origin(cols, rows);
     const y = 10;
@@ -234,7 +275,8 @@ test "drawn only into blank cells, at the bottom right, with the note above" {
     cells[text_index].glyph = atlas.get(face, "A");
     const text_cell = cells[text_index];
 
-    try std.testing.expectEqual(@as(u32, 600), m.draw(&cells, cols, rows, bg, "v9.9.9", face, &atlas, 0));
+    try std.testing.expectEqual(@as(u32, 600), m.draw(&cells, cols, rows, bg, face, &atlas, 0));
+    drawNote(&cells, cols, rows, bg, "v9.9.9", face, &atlas);
     try std.testing.expectEqual(text_cell, cells[text_index]);
     const beside = cells[text_index + 1];
     if (picture[y][x + 1].bits != 0) {

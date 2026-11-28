@@ -203,6 +203,16 @@ export fn upaa_renderer_set_note(renderer: *Renderer, text: [*:0]const u8) void 
     renderer.setNote(std.mem.span(text));
 }
 
+/// Turns the mascot on (with its greeting) or off.
+export fn upaa_renderer_set_mascot(renderer: *Renderer, on: bool) void {
+    renderer.setMascot(on);
+}
+
+/// Something happened in the pane, so the mascot's idle loop goes on for a while longer.
+export fn upaa_renderer_wake_mascot(renderer: *Renderer) void {
+    renderer.wakeMascot();
+}
+
 /// Plays the mascot's greeting again if the cell (col, row) is on it. Returns whether it was.
 export fn upaa_renderer_poke_mascot(renderer: *Renderer, col: i32, row: i32) bool {
     return renderer.pokeMascot(col, row);

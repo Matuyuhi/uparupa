@@ -15,6 +15,8 @@ final class Config {
     /// Cells.
     let cols: Int
     let rows: Int
+    /// Whether the axolotl is drawn behind the text.
+    let mascot: Bool
     /// The lines that could not be read, in the user's language.
     let problems: [String]
 
@@ -29,6 +31,7 @@ final class Config {
         backgroundOpacity = values.background_opacity
         cols = Int(values.window_width)
         rows = Int(values.window_height)
+        mascot = values.mascot
         problems = UnsafeBufferPointer(start: values.problems, count: values.problem_count).map { problem in
             let line = Int(problem.line)
             let start = Int(problem.key_start), end = start + Int(problem.key_len)
@@ -74,19 +77,29 @@ final class Config {
         return Config(text: String(decoding: data, as: UTF8.self))
     }
 
-    /// Puts font-family lines (the font, then its fallbacks) and a font-size line in the user's file, where its first
-    /// such line was, in place of all of them. Every other line stays as it is. A link to the file is followed.
+    /// Puts font-family lines (the font, then its fallbacks) and a font-size line in the user's file.
     static func saveFont(families: [String], size: Double) throws {
+        try save(families.map { "font-family = \"\($0)\"" } + ["font-size = \(String(format: "%g", size))"],
+                 keys: ["font-family", "font-size"])
+    }
+
+    static func saveMascot(_ on: Bool) throws {
+        try save(["mascot = \(on)"], keys: ["mascot"])
+    }
+
+    /// Puts the given lines in the user's file, where its first line with one of the keys was, in place of all of
+    /// them. Every other line stays as it is. A link to the file is followed.
+    private static func save(_ new: [String], keys: Set<String>) throws {
         let url = fileURL.resolvingSymlinksInPath()
         var lines = (try? String(contentsOf: url, encoding: .utf8))?.components(separatedBy: "\n") ?? []
         if lines.last == "" { lines.removeLast() }
-        func isFont(_ line: String) -> Bool {
+        func hasKey(_ line: String) -> Bool {
             let key = line.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
-            return key == "font-family" || key == "font-size"
+            return key.map { keys.contains($0) } ?? false
         }
-        let at = lines.firstIndex(where: isFont) ?? lines.count
-        lines.removeAll(where: isFont)
-        lines.insert(contentsOf: families.map { "font-family = \"\($0)\"" } + ["font-size = \(String(format: "%g", size))"], at: at)
+        let at = lines.firstIndex(where: hasKey) ?? lines.count
+        lines.removeAll(where: hasKey)
+        lines.insert(contentsOf: new, at: at)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
     }

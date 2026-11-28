@@ -20,6 +20,8 @@ final class TerminalView: MTKView, MTKViewDelegate {
     private var redrawTimer: Timer?
     /// A redraw is waiting to run after the current event.
     private var redrawQueued = false
+    /// Something other than redrawTimer asked for the next frame, so the mascot goes on moving rather than resting.
+    private var wakesMascot = false
     /// A grid resize is waiting to follow the drawable's size.
     private var resizeQueued = false
     /// The find bar (Cmd-F), floating over the bottom of the pane. Made the first time it opens.
@@ -106,7 +108,9 @@ final class TerminalView: MTKView, MTKViewDelegate {
     }
 
     /// Draws once the current event has been handled. Requests made while handling one event share a frame.
-    private func redraw() {
+    /// Every request but redrawTimer's is something happening in the view, which wakes the mascot.
+    private func redraw(wakingMascot: Bool = true) {
+        wakesMascot = wakesMascot || wakingMascot
         guard !redrawQueued else { return }
         redrawQueued = true
         DispatchQueue.main.async { [weak self] in
@@ -132,6 +136,8 @@ final class TerminalView: MTKView, MTKViewDelegate {
     func draw(in view: MTKView) {
         // Register to receive the next change notification before drawing.
         _ = session.takeDirty()
+        if wakesMascot { renderer.wakeMascot() }
+        wakesMascot = false
         guard window != nil,
               let pass = currentRenderPassDescriptor,
               let drawable = currentDrawable,
@@ -146,13 +152,22 @@ final class TerminalView: MTKView, MTKViewDelegate {
 
         redrawTimer?.invalidate()
         redrawTimer = renderer.redrawDelay.map { delay in
-            Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in self?.redraw() }
+            Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+                self?.redraw(wakingMascot: false)
+            }
         }
     }
 
     /// Shows a notice above the mascot (e.g. an update is available).
     func showNote(_ text: String) {
         renderer.setNote(text)
+        redraw()
+    }
+
+    /// Turns the mascot on (with its greeting) or off.
+    func setMascot(_ on: Bool) {
+        guard on != renderer.mascot else { return }
+        renderer.mascot = on
         redraw()
     }
 
