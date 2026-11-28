@@ -29,6 +29,8 @@ final class TerminalView: MTKView, MTKViewDelegate {
     var onFocus: (() -> Void)?
     /// The grid changed size.
     var onResize: (() -> Void)?
+    /// The screen changed (the program wrote something), whether or not the view is in the window.
+    var onOutput: (() -> Void)?
 
     /// Drawable pixels per view point (2 on Retina).
     private var scale: CGFloat { drawableSize.width / max(bounds.width, 1) }
@@ -48,7 +50,10 @@ final class TerminalView: MTKView, MTKViewDelegate {
         isPaused = true
         enableSetNeedsDisplay = false
         delegate = self
-        session.onWakeup = { [weak self] in self?.redraw() }
+        session.onWakeup = { [weak self] in
+            self?.redraw()
+            self?.onOutput?()
+        }
         session.setColors(dark: effectiveAppearance.isDark)
     }
 

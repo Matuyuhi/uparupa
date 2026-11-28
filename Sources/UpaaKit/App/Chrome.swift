@@ -6,7 +6,7 @@ enum Chrome {
     /// The tab list's width when the window opens.
     static let tabPanelWidth: CGFloat = 224
     /// The right panel's narrowest width.
-    static let sidePanelWidth: CGFloat = 240
+    static let sidePanelWidth: CGFloat = 340
     static let inactivePaneAlpha: CGFloat = 0.6
 
     /// The selected file. In light mode the panel's glass comes out nearly white, so the design's white pill is lost on
@@ -22,8 +22,21 @@ enum Chrome {
         $0.isDark ? NSColor(srgbRed: 1, green: 0x9f / 255, blue: 0x0a / 255, alpha: 1)
             : NSColor(srgbRed: 0xc4 / 255, green: 0x55 / 255, blue: 0, alpha: 1)
     }
-    static let addedLine = NSColor.systemGreen.withAlphaComponent(0.18)
-    static let removedLine = NSColor.systemRed.withAlphaComponent(0.16)
+    /// Added and removed: the + and - in front of a diff line, a file's counts, and the lines' backgrounds.
+    static let added = NSColor(name: nil) {
+        $0.isDark ? NSColor(srgbRed: 0x7c / 255, green: 0xcf / 255, blue: 0x7c / 255, alpha: 1)
+            : NSColor(srgbRed: 0x1a / 255, green: 0x7f / 255, blue: 0x1a / 255, alpha: 1)
+    }
+    static let removed = NSColor(name: nil) {
+        $0.isDark ? NSColor(srgbRed: 1, green: 0x7b / 255, blue: 0x72 / 255, alpha: 1)
+            : NSColor(srgbRed: 0xb3 / 255, green: 0x1d / 255, blue: 0x28 / 255, alpha: 1)
+    }
+    static let addedLine = NSColor(name: nil) {
+        NSColor(srgbRed: 46 / 255, green: 160 / 255, blue: 67 / 255, alpha: $0.isDark ? 0.22 : 0.14)
+    }
+    static let removedLine = NSColor(name: nil) {
+        NSColor(srgbRed: 248 / 255, green: 81 / 255, blue: 73 / 255, alpha: $0.isDark ? 0.2 : 0.13)
+    }
 
     static func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, mono: Bool = false,
                       color: NSColor = .labelColor) -> NSTextField {

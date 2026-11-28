@@ -116,7 +116,17 @@ pub fn running(pty: Pty, out: []u8) ?[]const u8 {
     const group = c.tcgetpgrp(pty.master);
     if (group <= 0 or group == pty.child) return null;
     const n = c.proc_name(group, out.ptr, @intCast(out.len));
-    return out[0..@intCast(@max(n, 0))];
+    if (n > 0) return out[0..@intCast(n)];
+    // proc_name reads only the user's own processes, and a setuid program (top, sudo) runs as root. The kernel's
+    // process table, which ps reads, gives any process's name, cut to 16 bytes.
+    var mib = [_]c_int{ c.CTL_KERN, c.KERN_PROC, c.KERN_PROC_PID, group };
+    var info: c.struct_kinfo_proc = undefined;
+    var size: usize = @sizeOf(c.struct_kinfo_proc);
+    if (c.sysctl(&mib, mib.len, &info, &size, null, 0) != 0 or size == 0) return out[0..0];
+    const name = std.mem.sliceTo(&info.kp_proc.p_comm, 0);
+    const len = @min(name.len, out.len);
+    @memcpy(out[0..len], name[0..len]);
+    return out[0..len];
 }
 
 /// Terminates the child process, reaps it, and closes the fd.
