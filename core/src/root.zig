@@ -159,6 +159,12 @@ export fn upaa_session_running(session: *Session, out: [*]u8, cap: usize) isize 
     return session.running(out[0..cap]);
 }
 
+/// The programs on the terminal other than the shell, in the foreground, background or stopped: each name followed by
+/// '\n', empty if it cannot be read. Returns the length written; names beyond cap are left out.
+export fn upaa_session_programs(session: *Session, out: [*]u8, cap: usize) usize {
+    return session.programs(out[0..cap]);
+}
+
 /// The title the program set (UTF-8). Returns the full length (0 if none); anything beyond cap is truncated.
 export fn upaa_session_title(session: *Session, out: [*]u8, cap: usize) usize {
     return session.title(out[0..cap]);

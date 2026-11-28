@@ -116,7 +116,7 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         tabStrip.onClose = { [weak self] index in
             guard let self else { return }
             let tab = self.tabs[index]
-            self.ask(String(localized: "Close this tab?"), about: tab.panes) { [weak self] in
+            self.ask(self.closing(tab: true), about: tab.panes) { [weak self] in
                 if let self, let index = self.tabs.firstIndex(where: { $0 === tab }) { self.closeTab(at: index) }
             }
         }
@@ -203,13 +203,13 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         return true
     }
 
-    /// The programs running in the panes, other than their shells.
-    var running: [String] { tabs.flatMap(\.panes).compactMap(\.session.running) }
+    /// The programs running in the panes, other than their shells, in the foreground or not.
+    var running: [String] { tabs.flatMap(\.panes).flatMap(\.session.programs) }
 
     /// Does then at once when no pane among panes runs a program other than its shell; otherwise asks first, in a
     /// sheet, as Terminal does, since closing ends those programs.
     private func ask(_ question: String, about panes: [TerminalView], then: @escaping () -> Void) {
-        let running = panes.compactMap(\.session.running)
+        let running = panes.flatMap(\.session.programs)
         guard !running.isEmpty else { return then() }
         Self.alert(question, button: String(localized: "Close"), running: running).beginSheetModal(for: window) {
             if $0 == .alertFirstButtonReturn { then() }
@@ -422,8 +422,16 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     /// Closes the focused pane, and the tab with its last pane, asking first while it runs a program.
     @objc func closePane(_ sender: Any?) {
-        let pane = tabs[selected].focus
-        ask(String(localized: "Close this pane?"), about: [pane]) { [weak self] in self?.close(pane) }
+        let tab = tabs[selected]
+        let pane = tab.focus
+        ask(closing(tab: pane === tab.top), about: [pane]) { [weak self] in self?.close(pane) }
+    }
+
+    /// The question before closing a pane, or a whole tab when tab is true, named by what goes: the window when it is
+    /// the last tab.
+    private func closing(tab: Bool) -> String {
+        !tab ? String(localized: "Close this pane?")
+            : tabs.count > 1 ? String(localized: "Close this tab?") : String(localized: "Close this window?")
     }
 
     /// Puts a new pane to the right of the focused one.
