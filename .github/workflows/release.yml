@@ -57,10 +57,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)"
-          open="$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
-            --jq ".[] | select(.title == \"$version\") | .open_issues")"
-          [ -n "$open" ] || { echo "No milestone is named $version"; exit 1; }
+          set -- $(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
+            --jq ".[] | select(.title == \"$version\") | \"\\(.number) \\(.open_issues)\"")
+          number="${1:-}"; open="${2:-}"
+          [ -n "$number" ] || { echo "No milestone is named $version"; exit 1; }
           [ "$open" = 0 ] || { echo "Milestone $version still has $open open issues or pull requests"; exit 1; }
+          # A patch release holds only fixes: every item in its milestone has the label bug.
+          if [ "${version##*.}" != 0 ]; then
+            others="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?milestone=$number&state=all&per_page=100" \
+              --jq '.[] | select(all(.labels[]; .name != "bug")) | "#\(.number)"' | tr '\n' ' ')"
+            [ -z "$others" ] || { echo "$version is a patch version, but $others are not labelled bug. Run bump-version.yml with part=minor"; exit 1; }
+          fi
 
   release:
     needs: [notes, milestone]
