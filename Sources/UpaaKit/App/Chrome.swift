@@ -191,7 +191,11 @@ final class Clickable: NSView {
 
     override func mouseEntered(with event: NSEvent) { hovered = true }
     override func mouseExited(with event: NSEvent) { hovered = false }
-    override func mouseDown(with event: NSEvent) { pressed = true }
+    /// A Control-click goes on to NSView, which shows the row's menu, as a right click does.
+    override func mouseDown(with event: NSEvent) {
+        guard !event.modifierFlags.contains(.control) else { return super.mouseDown(with: event) }
+        pressed = true
+    }
 
     override func mouseDragged(with event: NSEvent) {
         pressed = bounds.contains(convert(event.locationInWindow, from: nil))

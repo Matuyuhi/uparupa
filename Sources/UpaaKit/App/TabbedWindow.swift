@@ -479,6 +479,13 @@ final class TabbedWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         if !panel.isCollapsed, self.links.isHidden == !links {
             panel.animator().isCollapsed = true
         } else {
+            // Switching views in the open panel fades one into the other.
+            if !panel.isCollapsed, let sides = changes.superview {
+                sides.wantsLayer = true
+                let fade = CATransition()
+                fade.duration = Chrome.animation
+                sides.layer?.add(fade, forKey: "switch")
+            }
             self.links.isHidden = !links
             changes.isHidden = links
             panel.animator().isCollapsed = false

@@ -77,6 +77,9 @@
 "Links in This Session" = "このセッションに出たリンク";
 "No links yet" = "まだリンクはありません";
 "Other" = "その他";
+"PR #%lld" = "PR #%lld";
+"Issue #%lld" = "Issue #%lld";
+"Discussion #%lld" = "Discussion #%lld";
 "Notion page" = "Notion のページ";
 "Open Link" = "リンクを開く";
 "Copy Link" = "リンクをコピー";

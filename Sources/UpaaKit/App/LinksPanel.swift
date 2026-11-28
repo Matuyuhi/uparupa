@@ -68,9 +68,9 @@ final class LinksPanel: NSView {
             var title = parts.dropFirst(2).joined(separator: "/")
             if parts.count >= 4, let number = Int(parts[3]) {
                 switch parts[2] {
-                case "pull": title = "PR #\(number)"
-                case "issues": title = "Issue #\(number)"
-                case "discussions": title = "Discussion #\(number)"
+                case "pull": title = String(localized: "PR #\(number)")
+                case "issues": title = String(localized: "Issue #\(number)")
+                case "discussions": title = String(localized: "Discussion #\(number)")
                 default: break
                 }
             }
