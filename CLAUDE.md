@@ -43,7 +43,7 @@ Do not proceed by just piling on code. Avoid increasing the amount of code itsel
 
 - The title is in Japanese, and the description is short, plain English.
 - Every push to a pull request that is not a draft gets a Claude review (`.github/workflows/review.yml`, guidelines in `.github/review.md`). It ends with a verdict and puts the label `ready-to-merge` or `needs-human` on the pull request.
-- Claude merges its own pull request without asking when all of these hold: on the latest commit the `review` workflow finished and `test` passed, the label is `ready-to-merge`, and the user has asked for nothing on it that is still open. This is the one exception to asking before publishing (see "Rules to follow"). Then it checks that `test` passes on `main`.
+- Claude merges its own pull request without asking when all of these hold: on the latest commit the `review` workflow finished and `test` passed, the label `ready-to-merge` was put there by the review workflow (never by hand), and the user has asked for nothing on it that is still open. This is the one exception to asking before publishing (see "Rules to follow"). Then it checks that `test` passes on `main`.
 - Otherwise the user decides. Ask with the reasons from the verdict. Fix findings and push, so the review runs again, rather than asking about them.
 
 ## Version and release

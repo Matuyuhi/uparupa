@@ -45,7 +45,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - if: ${{ !github.event.pull_request.draft }}
+      - id: claude
+        if: ${{ !github.event.pull_request.draft }}
         uses: anthropics/claude-code-action@v1.0.290
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -60,22 +61,24 @@ jobs:
             Review this pull request as .github/review.md says.
             Post the summary with `gh pr review --comment --body "<summary>" ${{ github.event.pull_request.number }}`.
 
-      # Reads the verdict line of this workflow's review on this commit. With no such review, or for the paths below,
-      # the label is needs-human.
+      # Reads the verdict line of this run's review on this commit. The label is needs-human when the review did not
+      # finish, a request fails, the line is anything else, or the pull request touches the paths below.
       - name: Label the verdict
         if: ${{ !cancelled() && !github.event.pull_request.draft }}
+        env:
+          REVIEWED: ${{ steps.claude.outcome }}
         run: |
-          body="$(gh api "repos/$GH_REPO/pulls/$PR/reviews?per_page=100" \
-            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and .commit_id == \"$SHA\")] | last | .body // \"\"")"
-          verdict="$(printf '%s\n' "$body" | sed -e 's/\*//g' -e 's/[[:space:]]*$//' | grep '^判定:' | tail -n 1)"
-          echo "verdict: ${verdict:-none}"
-          # Changes to how pull requests are checked, built, installed or released, and reference images, are for a person to look at.
-          paths="$(gh api "repos/$GH_REPO/pulls/$PR/files" --paginate --jq '.[].filename' \
-            | grep -E '^(\.github/|CLAUDE\.md$|build\.zig\.zon$|install\.sh$|scripts/(upaa-launcher|fetch-ghostty-vt)\.sh$|tests/snapshots/|LICENSE$|THIRD_PARTY_LICENSES\.md$)' || true)"
-          [ -z "$paths" ] || printf 'paths for a person:\n%s\n' "$paths"
-          if [ "$verdict" = "判定: マージ可" ] && [ -z "$paths" ]; then
-            label=ready-to-merge
-          else
-            label=needs-human
+          label=needs-human
+          if [ "$REVIEWED" = success ] &&
+            files="$(gh api "repos/$GH_REPO/pulls/$PR/files" --paginate --jq '.[].filename')" &&
+            body="$(gh api "repos/$GH_REPO/pulls/$PR/reviews?per_page=100" \
+              --jq "[.[] | select(.user.login == \"github-actions[bot]\" and .commit_id == \"$SHA\")] | last | .body // \"\"")"; then
+            verdict="$(printf '%s\n' "$body" | sed -e 's/\*//g' -e 's/[[:space:]]*$//' | grep '^判定:' | tail -n 1)"
+            echo "verdict: ${verdict:-none}"
+            # Changes to how pull requests are checked, built, installed or released, and reference images, are for a person to look at.
+            paths="$(printf '%s\n' "$files" \
+              | grep -E '^(\.github/|CLAUDE\.md$|build\.zig\.zon$|install\.sh$|scripts/(upaa-launcher|fetch-ghostty-vt)\.sh$|tests/snapshots/|LICENSE$|THIRD_PARTY_LICENSES\.md$)' || true)"
+            [ -z "$paths" ] || printf 'paths for a person:\n%s\n' "$paths"
+            if [ "$verdict" = "判定: マージ可" ] && [ -z "$paths" ]; then label=ready-to-merge; fi
           fi
           gh api -X POST "repos/$GH_REPO/issues/$PR/labels" -f "labels[]=$label" --silent
