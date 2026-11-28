@@ -31,6 +31,9 @@ dirty: std.atomic.Value(bool) = .init(false),
 callbacks: Callbacks,
 /// The find bar's search through the screen and the scrollback. null while the find bar is closed.
 search: vt.GhosttySearch = null,
+/// The shell's jobs, in the background or stopped, as upaa's zsh startup files report them at each prompt with
+/// OSC 7385;jobs=N. -1 until the shell reports, as bash and fish never do.
+jobs: std.atomic.Value(i32) = .init(-1),
 /// The top of the screen at the last call of newText, followed as it scrolls up into the scrollback.
 link_mark: vt.GhosttyTrackedGridRef = null,
 
@@ -120,6 +123,9 @@ pub fn create(opts: Options) !*Session {
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_USERDATA, self);
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_WRITE_PTY, @ptrCast(&onWritePty));
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, @ptrCast(&onTitleChanged));
+    _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, @ptrCast(&onUnknownSequence));
+    var unknown_max: usize = 64;
+    _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown_max);
     // The library default (10,000 bytes) keeps only a few hundred lines of scrollback.
     var scrollback: usize = 10 * 1024 * 1024;
     _ = vt.ghostty_terminal_set(terminal, vt.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback);
@@ -390,6 +396,23 @@ pub fn cwd(self: *Session, out: []u8) usize {
 /// The program running in the foreground other than the shell, as Pty.running. Returns its name's length, -1 if none.
 pub fn running(self: *Session, out: []u8) isize {
     return @intCast((self.pty.running(out) orelse return -1).len);
+}
+
+/// The programs that closing the session would end, each name followed by '\n' (empty when it cannot be read): the
+/// one in the foreground, or else the shell's jobs. A shell that reports its jobs (zsh with upaa's startup files) gives
+/// one empty name for each; for any other, they are the processes on the terminal, as Pty.programs. Returns the
+/// length written.
+pub fn programs(self: *Session, out: []u8) usize {
+    if (out.len == 0) return 0;
+    if (self.pty.running(out[0 .. out.len - 1])) |name| {
+        out[name.len] = '\n';
+        return name.len + 1;
+    }
+    const jobs = self.jobs.load(.monotonic);
+    if (jobs < 0) return self.pty.programs(out);
+    const n = @min(@as(usize, @intCast(jobs)), out.len);
+    @memset(out[0..n], '\n');
+    return n;
 }
 
 /// The title the program set (UTF-8), copied into out. Returns the full length; 0 if none was set.
@@ -688,6 +711,17 @@ fn onTitleChanged(_: vt.GhosttyTerminal, userdata: ?*anyopaque) callconv(.c) voi
     if (self.callbacks.on_title) |f| f(self.callbacks.userdata);
 }
 
+/// Takes the count of jobs from upaa's zsh startup files (OSC 7385;jobs=N) and ignores any other sequence.
+fn onUnknownSequence(_: vt.GhosttyTerminal, userdata: ?*anyopaque, sequence: [*c]const vt.GhosttyTerminalUnknownSequence) callconv(.c) void {
+    const self: *Session = @ptrCast(@alignCast(userdata orelse return));
+    if (sequence.*.tag != vt.GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_OSC) return;
+    const content = sequence.*.value.osc.content;
+    const prefix = "7385;jobs=";
+    if (content.len <= prefix.len or !std.mem.startsWith(u8, content.ptr[0..content.len], prefix)) return;
+    const jobs = std.fmt.parseInt(i32, content.ptr[prefix.len..content.len], 10) catch return;
+    self.jobs.store(jobs, .monotonic);
+}
+
 fn waitForText(self: *Session, needle: []const u8, out: []u8) !void {
     var tries: usize = 0;
     while (tries < 500) : (tries += 1) {
@@ -806,6 +840,50 @@ test "a program the shell runs in the foreground is told from the shell" {
         _ = c.usleep(100 * 1000);
     }
     try std.testing.expectEqualStrings("sleep", name[0..@intCast(@max(n, 0))]);
+}
+
+test "a job the shell runs in the background is counted among its programs" {
+    const self = try Session.create(.{ .size = .{ .cols = 80, .rows = 24 }, .command = "/bin/sh" });
+    defer self.destroy();
+    self.write("sleep 5 &\n");
+    try self.waitForPrograms("sleep\n");
+}
+
+test "zsh with upaa's startup files reports its jobs, but not the ones it disowned" {
+    const self = try Session.create(.{
+        .size = .{ .cols = 80, .rows = 24 },
+        .command = "UPAA_ZDOTDIR=\"$PWD/tests/zsh\" ZDOTDIR=\"$PWD/Resources/shell-integration/zsh\" exec zsh -i",
+    });
+    defer self.destroy();
+    var out: [8192]u8 = undefined;
+    try self.waitForPrompt(80, &out);
+    try self.waitForPrograms("");
+    // Themes start their daemons this way, as powerlevel10k does gitstatusd. It stays on the terminal, but is no job.
+    self.write("sleep 3 &!; echo disowned-$((1+1))\n");
+    try self.waitForText("disowned-2", &out);
+    self.write("sleep 30 &\n");
+    try self.waitForPrograms("\n");
+    self.write("kill %1; wait\n");
+    try self.waitForPrograms("");
+}
+
+/// Waits until programs gives the names expected.
+fn waitForPrograms(self: *Session, expected: []const u8) !void {
+    var names: [256]u8 = undefined;
+    var n: usize = 0;
+    var tries: usize = 0;
+    while (tries < 500) : (tries += 1) {
+        n = self.programs(&names);
+        if (std.mem.eql(u8, names[0..n], expected)) return;
+        _ = c.usleep(10 * 1000);
+    }
+    try std.testing.expectEqualStrings(expected, names[0..n]);
+}
+
+test "a count of jobs reported by the shell stands for them" {
+    const self = try Session.create(.{ .size = .{ .cols = 80, .rows = 24 }, .command = "printf '\\033]7385;jobs=2\\007'; read _" });
+    defer self.destroy();
+    try self.waitForPrograms("\n\n");
 }
 
 fn typeText(self: *Session, text: []const u8) void {

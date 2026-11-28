@@ -6,6 +6,10 @@
 
 _upaa_precmd() {
   builtin emulate -L zsh
+  # Tells upaa how many jobs the shell has, in the background or stopped, with its own OSC 7385, so it asks before
+  # closing the pane would end them. A job disowned with &! or disown, as themes start their daemons (powerlevel10k's
+  # gitstatusd), is not one.
+  builtin print -n "\e]7385;jobs=${#jobstates}\a"
   # Themes such as powerlevel10k set PS1 in their own precmd hook, so this one moves itself to the end. Hooks after
   # it may still replace PS1 for this prompt, so this prompt's start is marked directly.
   if [[ ${precmd_functions[-1]} != _upaa_precmd ]]; then
@@ -27,6 +31,7 @@ _upaa_preexec() {
   builtin print -n '\e]133;C\a'
 }
 
+builtin zmodload zsh/parameter
 typeset -ga precmd_functions preexec_functions
 precmd_functions+=(_upaa_precmd)
 preexec_functions+=(_upaa_preexec)
